@@ -6,6 +6,7 @@ Körs av GitHub Actions (se .github/workflows/pages.yml) men fungerar även loka
 """
 
 import json
+import os
 import re
 import sys
 import time
@@ -17,6 +18,8 @@ import yfinance as yf
 ROOT = Path(__file__).resolve().parent.parent
 WATCHLIST = ROOT / "watchlist.txt"
 OUT = ROOT / "site" / "data"
+MARKET = "SPY"  # S&P 500-fonden, används för marknadsfiltret
+SKIP_INFO = os.environ.get("SKIP_INFO") == "1"
 
 
 def file_id(symbol: str) -> str:
@@ -32,7 +35,7 @@ def read_watchlist() -> list[str]:
     return symbols
 
 
-def fetch(symbol: str) -> dict | None:
+def fetch(symbol: str, info: bool = True) -> dict | None:
     t = yf.Ticker(symbol)
     df = t.history(period="5y", interval="1d", auto_adjust=False)
     if df.empty:
@@ -51,6 +54,8 @@ def fetch(symbol: str) -> dict | None:
     ]
     name, currency = symbol, ""
     try:
+        if not info or SKIP_INFO:
+            raise RuntimeError("hoppar över info")
         info = t.get_info()
         name = info.get("longName") or info.get("shortName") or symbol
         currency = info.get("currency") or ""
@@ -77,10 +82,19 @@ def main() -> int:
         (OUT / f"{fid}.json").write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
         index.append({"symbol": symbol, "name": data["name"], "file": f"{fid}.json"})
         print(f"OK {symbol}: {len(data['candles'])} dagar")
-        time.sleep(0.3)  # var snäll mot Yahoo
+        time.sleep(0.1 if SKIP_INFO else 0.3)  # var snäll mot Yahoo
+    market_file = None
+    try:
+        m = fetch(MARKET, info=False)
+        if m:
+            market_file = "market_SPY.json"
+            (OUT / market_file).write_text(json.dumps(m, separators=(",", ":")), encoding="utf-8")
+            print(f"OK marknad {MARKET}: {len(m['candles'])} dagar")
+    except Exception as e:
+        print(f"FEL marknad {MARKET}: {e}", file=sys.stderr)
     (OUT / "index.json").write_text(
         json.dumps(
-            {"updated": datetime.now(timezone.utc).isoformat(timespec="minutes"), "stocks": index},
+            {"updated": datetime.now(timezone.utc).isoformat(timespec="minutes"), "stocks": index, "market": market_file},
             ensure_ascii=False,
         ),
         encoding="utf-8",
