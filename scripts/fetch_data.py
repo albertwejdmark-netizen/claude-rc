@@ -8,6 +8,7 @@ Körs av GitHub Actions (se .github/workflows/pages.yml) men fungerar även loka
 import json
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -55,6 +56,8 @@ def fetch(symbol: str) -> dict | None:
         currency = info.get("currency") or ""
     except Exception:  # info-anropet är opålitligt; kursdatan räcker
         pass
+    if not currency and "." not in symbol:
+        currency = "USD"
     return {"symbol": symbol, "name": name, "currency": currency, "candles": candles}
 
 
@@ -74,6 +77,7 @@ def main() -> int:
         (OUT / f"{fid}.json").write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
         index.append({"symbol": symbol, "name": data["name"], "file": f"{fid}.json"})
         print(f"OK {symbol}: {len(data['candles'])} dagar")
+        time.sleep(0.3)  # var snäll mot Yahoo
     (OUT / "index.json").write_text(
         json.dumps(
             {"updated": datetime.now(timezone.utc).isoformat(timespec="minutes"), "stocks": index},
