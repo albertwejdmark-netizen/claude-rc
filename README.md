@@ -8,6 +8,19 @@ En hemsida som visar stöd- och motståndsnivåer för amerikanska aktier, med c
 3. **Styrka**: fler träffar och färskare träffar väger tyngre. Nivåer under kursen är stöd, över är motstånd.
 4. **Pivotpunkter** (P, R1–R3, S1–S3) räknas från förra dagen, veckan eller månaden.
 
+## Bättre nivåer
+- Svängpunkter grupperas mot gruppens snitt och närliggande grupper slås ihop.
+- Varje svängpunkt väger efter färskhet, volym (relativ volym) och om den syns även på längre sikt (3× svängfönstret).
+- **Respekterad %**: hur ofta kursen vände i zonen jämfört med hur ofta den stängde igenom.
+- **Rollbyte**: nivåer som varit både stöd och motstånd får bonus.
+- Nivåerna visas som zoner (övre/undre kant) i grafen och tabellen.
+
+## Stoploss och take profit
+Handelsplanen visar köp, stoploss och TP1–TP3 med avstånd i % och R-multipel, för en aktiv signal eller annars för köp på senaste kurs.
+- **Stoploss**: under stödzonen (standard) eller 1,5 / 2 / 3 × ATR under köpet.
+- **Take profit**: nästa tre motstånd (fylls på med R-multiplar om det saknas motstånd) eller 1R / 2R / 3R.
+- Varje historisk signal följs upp: vilka TP som nåddes innan stoploss.
+
 ## Signaler
 Signalerna utvärderas på dagens stängning mot nivåerna som fanns dagen innan (ingen framåtblick):
 
@@ -16,7 +29,6 @@ Signalerna utvärderas på dagens stängning mot nivåerna som fanns dagen innan
 | Long | Utbrott | Stänger över ett motstånd med minst ¼ ATR marginal |
 | Long | Studs på stöd | Dagens lägsta når stödzonen, stänger över stödet, grön dag |
 
-- **Stopp** läggs på andra sidan nivån (± zonbredd), **mål** är nästa nivå (annars 2 × risken).
 - **Trendfilter** (valbart): signaler bara när kursen ligger över SMA 50.
 - **Minsta risk/belöning** filtrerar bort signaler med för litet mål i förhållande till stoppet.
 - Varje historisk signal följs upp (mål nått, stoppad eller aktiv) och sidan visar träffsäkerhet och snitt-R för perioden.
