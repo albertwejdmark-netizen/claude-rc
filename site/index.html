@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stöd &amp; Motstånd</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#fff; --text:#16181d; --muted:#626a77; --border:#dfe3e8;
+  --accent:#2a62d9; --sup:#138a52; --sup-bg:#e3f4ea; --res:#c8323a; --res-bg:#fbe6e7;
+  --piv:#8a6d12; --grid:#eceef2;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f1115; --panel:#171a20; --text:#e6e8ec; --muted:#959cab; --border:#2a2f38;
+    --accent:#6f9bff; --sup:#3ccf86; --sup-bg:#13291f; --res:#ff6b72; --res-bg:#311719;
+    --piv:#e0bd4f; --grid:#21252d;
+  }
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border);background:var(--panel)}
+h1{font-size:18px;margin:0 12px 0 0;white-space:nowrap}
+main{max-width:1200px;margin:0 auto;padding:16px}
+input,select,button{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:7px 10px}
+button{cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+#search{min-width:0;flex:1 1 200px;max-width:320px}
+.tabs{display:flex;gap:4px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:3px}
+.tabs button{border:0;background:transparent;padding:5px 12px;border-radius:7px;color:var(--muted)}
+.tabs button.on{background:var(--panel);color:var(--text);font-weight:600;box-shadow:0 1px 2px #0002}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
+.card .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.card .value{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+.card .sub{font-size:13px;color:var(--muted)}
+.card.signal-long{border-color:var(--sup);background:var(--sup-bg)}
+.card.signal-short{border-color:var(--res);background:var(--res-bg)}
+.sup{color:var(--sup)} .res{color:var(--res)}
+.layout{display:grid;grid-template-columns:1fr 280px;gap:14px}
+@media (max-width:900px){.layout{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px}
+.chartbox{display:flex;flex-direction:column}
+#chart{flex:1;min-height:480px;width:100%}
+@media (max-width:600px){#chart{min-height:360px}}
+.settings h3{font-size:13px;margin:16px 0 0;padding-top:12px;border-top:1px solid var(--border)}
+.settings label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+.settings input[type=range]{width:100%;padding:0}
+.settings select{width:100%}
+.settings .row{display:flex;justify-content:space-between;align-items:center}
+.check{display:flex!important;gap:8px;align-items:center;color:var(--text)!important}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font-size:12px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+td.l,th.l{text-align:left}
+.tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600}
+.tag.sup{background:var(--sup-bg)} .tag.res{background:var(--res-bg)}
+.tag.piv{background:transparent;color:var(--piv);border:1px solid var(--piv)}
+.tag.neutral{background:var(--bg);color:var(--muted)}
+tr.current td{font-weight:600;background:var(--bg)}
+tr.click{cursor:pointer} tr.click:hover td{background:var(--bg)}
+.table-wrap{overflow-x:auto}
+h2{font-size:16px;margin:0 0 10px}
+.msg{padding:28px;text-align:center}
+.stars{letter-spacing:1px;color:var(--accent)}
+.stats{display:flex;flex-wrap:wrap;gap:8px 22px;margin:0 0 10px;font-size:14px}
+.stats b{font-variant-numeric:tabular-nums}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+footer{max-width:1200px;margin:0 auto;padding:4px 16px 30px;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Stöd &amp; Motstånd</h1>
+  <div class="tabs"><button id="tabChart" class="on">Graf</button><button id="tabScan">Signalöversikt</button></div>
+  <input id="search" list="stocklist" placeholder="Sök aktie, t.ex. AAPL" autocomplete="off">
+  <datalist id="stocklist"></datalist>
+  <button id="csvBtn" title="Ladda upp egen kursdata (CSV)">Ladda upp CSV</button>
+  <input id="csvFile" type="file" accept=".csv,.txt" hidden>
+  <span id="updated" class="muted small"></span>
+</header>
+
+<main>
+  <!-- ===== Grafvy ===== -->
+  <section id="viewChart">
+    <div id="content" hidden>
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <h2 id="title" style="font-size:20px;margin:0"></h2>
+        <span id="subtitle" class="muted small"></span>
+      </div>
+      <div class="cards">
+        <div class="card"><div class="label">Senaste kurs</div><div class="value" id="cLast">–</div><div class="sub" id="cLastSub"></div></div>
+        <div class="card" id="cSigCard"><div class="label">Signal</div><div class="value" id="cSig">–</div><div class="sub" id="cSigSub"></div></div>
+        <div class="card"><div class="label">Närmaste stöd</div><div class="value sup" id="cSup">–</div><div class="sub" id="cSupSub"></div></div>
+        <div class="card"><div class="label">Närmaste motstånd</div><div class="value res" id="cRes">–</div><div class="sub" id="cResSub"></div></div>
+        <div class="card"><div class="label">ATR (14)</div><div class="value" id="cAtr">–</div><div class="sub" id="cAtrSub"></div></div>
+      </div>
+
+      <div class="layout">
+        <div class="panel chartbox" style="padding:8px"><div id="chart"></div></div>
+        <div class="panel settings">
+          <label for="period" style="margin-top:0">Period</label>
+          <select id="period">
+            <option value="126">6 månader</option>
+            <option value="252" selected>1 år</option>
+            <option value="504">2 år</option>
+            <option value="1260">5 år</option>
+          </select>
+          <label for="win"><span class="row"><span>Känslighet (svängfönster)</span><b id="winV"></b></span></label>
+          <input id="win" type="range" min="2" max="20" value="5">
+          <label for="tol"><span class="row"><span>Zonbredd (× ATR)</span><b id="tolV"></b></span></label>
+          <input id="tol" type="range" min="0.2" max="2" step="0.1" value="0.6">
+          <label for="minT"><span class="row"><span>Minsta antal träffar</span><b id="minTV"></b></span></label>
+          <input id="minT" type="range" min="1" max="5" value="2">
+          <label for="maxN"><span class="row"><span>Nivåer per sida</span><b id="maxNV"></b></span></label>
+          <input id="maxN" type="range" min="1" max="8" value="4">
+          <label for="pivBase">Klassiska pivotpunkter</label>
+          <select id="pivBase">
+            <option value="off">Visa inte</option>
+            <option value="day">Från senaste dagen</option>
+            <option value="week" selected>Från förra veckan</option>
+            <option value="month">Från förra månaden</option>
+          </select>
+          <label class="check"><input type="checkbox" id="markers"> Markera svängpunkter</label>
+
+          <h3>Signaler</h3>
+          <label class="check"><input type="checkbox" id="showSig" checked> Visa long/short i grafen</label>
+          <label class="check"><input type="checkbox" id="trend" checked> Bara med trenden (SMA 50)</label>
+          <label for="minRR"><span class="row"><span>Minsta risk/belöning</span><b id="minRRV"></b></span></label>
+          <input id="minRR" type="range" min="0" max="3" step="0.25" value="1">
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:14px">
+        <h2>Signaler i perioden</h2>
+        <div class="stats" id="sigStats"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Datum</th><th class="l">Signal</th><th class="l">Typ</th><th>Kurs</th><th>Stopp</th><th>Mål</th><th>R/R</th><th class="l">Utfall</th></tr></thead>
+            <tbody id="sigRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:14px">
+        <h2>Nivåer</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Typ</th><th>Nivå</th><th>Avstånd</th><th>Träffar</th><th>Senast testad</th><th>Styrka</th></tr></thead>
+            <tbody id="levels"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div id="message" class="panel msg"></div>
+  </section>
+
+  <!-- ===== Signalöversikt ===== -->
+  <section id="viewScan" hidden>
+    <div class="panel">
+      <div class="toolbar">
+        <h2 style="margin:0 auto 0 0">Signalöversikt</h2>
+        <select id="scanDays">
+          <option value="1">Senaste dagen</option>
+          <option value="3">Senaste 3 dagarna</option>
+          <option value="5" selected>Senaste 5 dagarna</option>
+          <option value="10">Senaste 10 dagarna</option>
+          <option value="21">Senaste månaden</option>
+        </select>
+        <select id="scanSide">
+          <option value="all">Long och short</option>
+          <option value="long">Bara long</option>
+          <option value="short">Bara short</option>
+        </select>
+        <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="scanActive" checked> Bara aktiva</label>
+      </div>
+      <p id="scanStatus" class="muted small" style="margin:0 0 10px"></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Aktie</th><th>Kurs</th><th class="l">Signal</th><th class="l">Typ</th><th>Datum</th><th>Stopp</th><th>Mål</th><th>R/R</th><th class="l">Status</th></tr></thead>
+          <tbody id="scanRows"></tbody>
+        </table>
+      </div>
+      <p class="muted small" style="margin:12px 0 0">Använder inställningarna från grafvyn. Klicka på en rad för att öppna aktien.</p>
+    </div>
+  </section>
+</main>
+<footer>Endast i informationssyfte – inte investeringsrådgivning. Signalerna är mekaniska regler och historiskt utfall är ingen garanti. Kursdata från Yahoo Finance via yfinance. Grafer: TradingView Lightweight Charts™.</footer>
+
+<script src="vendor/lightweight-charts.standalone.production.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const esc = s => String(s).replace(/[<>&"]/g, ch => ({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[ch]));
+const state = { index: [], data: null, chart: null, candleSeries: null, volSeries: null, priceLines: [], cache: new Map() };
+
+/* ---------- Formatering ---------- */
+function fmt(x){
+  if (x == null || !isFinite(x)) return "–";
+  const d = Math.abs(x) >= 1000 ? 0 : Math.abs(x) >= 10 ? 2 : 3;
+  return x.toLocaleString("sv-SE", {minimumFractionDigits:d, maximumFractionDigits:d});
+}
+const pct = x => (x > 0 ? "+" : "") + x.toLocaleString("sv-SE",{minimumFractionDigits:1,maximumFractionDigits:1}) + " %";
+const num1 = x => x.toLocaleString("sv-SE",{minimumFractionDigits:1,maximumFractionDigits:1});
+
+/* ---------- Inställningar ---------- */
+function opts(){
+  return {
+    L: +$("period").value, k: +$("win").value, tolF: +$("tol").value, minT: +$("minT").value,
+    maxN: +$("maxN").value, trend: $("trend").checked, minRR: +$("minRR").value,
+  };
+}
+
+/* ---------- Beräkningar ---------- */
+// Förberedda serier för en aktie: ATR(14), SMA(50) och svängpunkter
+function prepare(all, k){
+  const n = all.length, atrA = new Array(n).fill(NaN), sma = new Array(n).fill(NaN);
+  let trSum = 0, cSum = 0; const tr = [0];
+  for (let i = 1; i < n; i++){
+    const [, , h, l] = all[i], pc = all[i-1][4];
+    tr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  for (let i = 0; i < n; i++){
+    trSum += tr[i]; if (i >= 15) trSum -= tr[i-14];
+    if (i >= 14) atrA[i] = (i >= 15 ? trSum : trSum - tr[0]) / 14;
+    cSum += all[i][4]; if (i >= 50) cSum -= all[i-50][4];
+    if (i >= 49) sma[i] = cSum / 50;
+  }
+  return { all, atrA, sma, pivots: findPivots(all, k), k };
+}
+
+function findPivots(c, k){
+  const piv = [];
+  for (let i = k; i < c.length - k; i++){
+    let isHigh = true, isLow = true;
+    for (let j = i - k; j <= i + k; j++){
+      if (j === i) continue;
+      if (c[j][2] > c[i][2]) isHigh = false;
+      if (c[j][3] < c[i][3]) isLow = false;
+      if (!isHigh && !isLow) break;
+    }
+    if (isHigh) piv.push({i, price:c[i][2], kind:"high"});
+    if (isLow)  piv.push({i, price:c[i][3], kind:"low"});
+  }
+  return piv;
+}
+
+// Nivåer så som de såg ut vid slutet av dag t (bara svängpunkter som var bekräftade då)
+function levelsAt(ctx, t, o){
+  const { all, atrA, pivots, k } = ctx;
+  const start = Math.max(0, t - o.L + 1);
+  const pts = pivots.filter(p => p.i >= start && p.i <= t - k);
+  const a = atrA[t], close = all[t][4];
+  const tol = Math.max((isFinite(a) ? a : close * 0.02) * o.tolF, close * 0.002);
+  const sorted = pts.sort((x,y)=>x.price-y.price);
+  const clusters = [];
+  for (const p of sorted){
+    const cl = clusters[clusters.length-1];
+    if (cl && p.price - cl.min <= tol) cl.pts.push(p); else clusters.push({min:p.price, pts:[p]});
+  }
+  const span = Math.max(1, t - start);
+  const levels = clusters.map(cl => {
+    let wSum = 0, pSum = 0;
+    for (const p of cl.pts){ const w = 0.4 + 0.6 * (p.i - start) / span; wSum += w; pSum += w * p.price; }
+    const lastI = Math.max(...cl.pts.map(p=>p.i));
+    return { price:pSum/wSum, touches:cl.pts.length, score:wSum, lastDate:all[lastI][0],
+             highs:cl.pts.filter(p=>p.kind==="high").length, lows:cl.pts.filter(p=>p.kind==="low").length };
+  }).filter(l => l.touches >= o.minT);
+  return { levels, tol, a: isFinite(a) ? a : close * 0.02, start, pts };
+}
+
+/* Signalregler (utvärderas på dagens stängning mot gårdagens nivåer):
+   Long  – Utbrott: stängning över ett motstånd med minst ¼ ATR marginal.
+         – Studs:   dagens lägsta når stödzonen, stängning över stödet och grön dag.
+   Short – Nedbrott: stängning under ett stöd med minst ¼ ATR marginal.
+         – Avvisning: dagens högsta når motståndszonen, stängning under motståndet och röd dag.
+   Stopp läggs på andra sidan nivån (± zonbredd), målet är nästa nivå (annars 2R). */
+function signalAt(ctx, t, o){
+  if (t < 60) return null;
+  const { all, sma } = ctx;
+  const LV = levelsAt(ctx, t - 1, o);
+  if (!LV.levels.length) return null;
+  const [date, O, H, Lo, C] = all[t], P = all[t-1][4], a = LV.a, tol = LV.tol;
+  const lv = LV.levels.map(l => l.price).sort((x,y)=>x-y);
+  const upBreaks = lv.filter(x => P <= x && C > x + 0.25 * a);
+  const dnBreaks = lv.filter(x => P >= x && C < x - 0.25 * a);
+  const below = lv.filter(x => x < C), above = lv.filter(x => x > C);
+  let s = null;
+  if (upBreaks.length){ const x = Math.max(...upBreaks); s = {side:"long", kind:"Utbrott", level:x, stop:x - tol}; }
+  else if (dnBreaks.length){ const x = Math.min(...dnBreaks); s = {side:"short", kind:"Nedbrott", level:x, stop:x + tol}; }
+  else {
+    const sp = below.length ? below[below.length-1] : null, rs = above.length ? above[0] : null;
+    if (sp != null && Lo <= sp + tol && C > O && C - sp <= a) s = {side:"long", kind:"Studs på stöd", level:sp, stop:sp - tol};
+    else if (rs != null && H >= rs - tol && C < O && rs - C <= a) s = {side:"short", kind:"Avvisad vid motstånd", level:rs, stop:rs + tol};
+  }
+  if (!s) return null;
+  if (o.trend && isFinite(sma[t]) && ((s.side === "long" && C < sma[t]) || (s.side === "short" && C > sma[t]))) return null;
+  if (s.side === "long"){
+    const tg = lv.find(x => x > C + 0.5 * a); s.target = tg ?? C + 2 * (C - s.stop);
+  } else {
+    const tg = [...lv].reverse().find(x => x < C - 0.5 * a); s.target = tg ?? C - 2 * (s.stop - C);
+  }
+  const risk = Math.abs(C - s.stop);
+  if (risk <= 0) return null;
+  s.rr = Math.abs(s.target - C) / risk;
+  if (s.rr < o.minRR) return null;
+  return { ...s, t, date, entry:C };
+}
+
+// Följ upp en signal: nåddes målet eller stoppet först?
+function outcome(all, s){
+  for (let j = s.t + 1; j < all.length; j++){
+    const [, , h, l] = all[j];
+    if (s.side === "long"){
+      if (l <= s.stop) return {res:"loss", r:-1, date:all[j][0]};
+      if (h >= s.target) return {res:"win", r:s.rr, date:all[j][0]};
+    } else {
+      if (h >= s.stop) return {res:"loss", r:-1, date:all[j][0]};
+      if (l <= s.target) return {res:"win", r:s.rr, date:all[j][0]};
+    }
+  }
+  return {res:"open", r:0};
+}
+
+function signalsInRange(ctx, from, to, o){
+  const out = []; const lastT = {long:-1e9, short:-1e9};
+  for (let t = Math.max(from, 60); t <= to; t++){
+    const s = signalAt(ctx, t, o);
+    if (!s || t - lastT[s.side] < ctx.k) continue; // undvik upprepningar
+    lastT[s.side] = t;
+    s.out = outcome(ctx.all, s);
+    out.push(s);
+  }
+  return out;
+}
+
+function classicPivots(all, base){
+  if (base === "off" || all.length < 2) return null;
+  let rows;
+  if (base === "day") rows = [all[all.length-1]];
+  else {
+    const key = base === "week"
+      ? d => { const x = new Date(d); const day = (x.getUTCDay()+6)%7; x.setUTCDate(x.getUTCDate()-day); return x.toISOString().slice(0,10); }
+      : d => d.slice(0,7);
+    const curKey = key(all[all.length-1][0]);
+    let prevKey = null;
+    for (let i = all.length-1; i >= 0; i--){ const k = key(all[i][0]); if (k !== curKey){ prevKey = k; break; } }
+    if (!prevKey) return null;
+    rows = all.filter(r => key(r[0]) === prevKey);
+  }
+  const H = Math.max(...rows.map(r=>r[2])), L = Math.min(...rows.map(r=>r[3])), C = rows[rows.length-1][4];
+  const P = (H + L + C) / 3;
+  return [["R3", H + 2*(P - L)], ["R2", P + (H - L)], ["R1", 2*P - L], ["P", P],
+          ["S1", 2*P - H], ["S2", P - (H - L)], ["S3", L - 2*(H - P)]];
+}
+
+/* ---------- Diagram ---------- */
+function buildChart(){
+  const el = $("chart");
+  el.innerHTML = "";
+  const chart = LightweightCharts.createChart(el, {
+    autoSize: true,
+    layout: { background:{type:"solid", color:css("--panel")}, textColor:css("--muted"), fontFamily:"system-ui, sans-serif" },
+    grid: { vertLines:{color:css("--grid")}, horzLines:{color:css("--grid")} },
+    rightPriceScale: { borderColor:css("--border") },
+    timeScale: { borderColor:css("--border") },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    localization: { locale: "sv-SE" },
+  });
+  state.candleSeries = chart.addCandlestickSeries({
+    upColor:css("--sup"), downColor:css("--res"), borderVisible:false,
+    wickUpColor:css("--sup"), wickDownColor:css("--res"),
+  });
+  state.volSeries = chart.addHistogramSeries({ priceScaleId:"vol", priceFormat:{type:"volume"}, lastValueVisible:false, priceLineVisible:false });
+  chart.priceScale("vol").applyOptions({ scaleMargins:{top:0.85, bottom:0} });
+  state.chart = chart;
+}
+
+/* ---------- Rendering av grafvyn ---------- */
+function setLabels(){
+  $("winV").textContent = $("win").value + " dagar";
+  $("tolV").textContent = (+$("tol").value).toFixed(1);
+  $("minTV").textContent = $("minT").value;
+  $("maxNV").textContent = $("maxN").value;
+  $("minRRV").textContent = (+$("minRR").value).toFixed(2).replace(".", ",");
+}
+
+const sigTag = s => s.side === "long" ? `<span class="tag sup">Long</span>` : `<span class="tag res">Short</span>`;
+const outText = o => o.res === "win" ? `<span class="sup">Mål nått ${o.date}</span>` : o.res === "loss" ? `<span class="res">Stoppad ${o.date}</span>` : `<span class="muted">Aktiv</span>`;
+
+function render(){
+  setLabels();
+  const d = state.data; if (!d) return;
+  const o = opts();
+  const all = d.candles, n = all.length, T = n - 1;
+  const ctx = prepare(all, o.k);
+  const LV = levelsAt(ctx, T, o);
+  const c = all.slice(LV.start), off = LV.start;
+  const last = all[T], close = last[4], prev = n > 1 ? all[T-1][4] : close, a = LV.a;
+
+  const levels = LV.levels;
+  const maxScore = Math.max(1e-9, ...levels.map(l=>l.score));
+  const sup = levels.filter(l => l.price < close).sort((x,y)=>y.score-x.score).slice(0,o.maxN).sort((x,y)=>y.price-x.price);
+  const res = levels.filter(l => l.price >= close).sort((x,y)=>y.score-x.score).slice(0,o.maxN).sort((x,y)=>x.price-y.price);
+  // Saknas nivå på någon sida (t.ex. vid ny botten/topp) används periodens lägsta/högsta
+  const extreme = kind => { const col = kind === "low" ? 3 : 2; let bi = 0;
+    c.forEach((r,i) => { if (kind === "low" ? r[col] < c[bi][col] : r[col] > c[bi][col]) bi = i; });
+    return {price:c[bi][col], touches:1, score:0, lastDate:c[bi][0], highs:+(kind==="high"), lows:+(kind==="low"), extreme:true}; };
+  if (!sup.length){ const e = extreme("low"); if (e.price < close) sup.push(e); }
+  if (!res.length){ const e = extreme("high"); if (e.price > close) res.push(e); }
+  const piv = classicPivots(all, $("pivBase").value);
+  const sigs = signalsInRange(ctx, off + 1, T, o);
+  const active = [...sigs].reverse().find(s => s.out.res === "open" && T - s.t <= 10);
+
+  // Kort
+  const currency = d.currency || "";
+  $("cLast").textContent = fmt(close) + (currency ? " " + currency : "");
+  const chg = (close/prev - 1) * 100;
+  $("cLastSub").innerHTML = `<span class="${chg>=0?"sup":"res"}">${pct(chg)}</span> · ${last[0]}`;
+  const ns = sup[0], nr = res[0];
+  $("cSup").textContent = ns ? fmt(ns.price) : "–";
+  $("cSupSub").textContent = ns ? `${pct((ns.price/close-1)*100)} · ${ns.extreme ? "periodens botten" : ns.touches + " träffar"}` : "Ingen nivå under kursen";
+  $("cRes").textContent = nr ? fmt(nr.price) : "–";
+  $("cResSub").textContent = nr ? `${pct((nr.price/close-1)*100)} · ${nr.extreme ? "periodens topp" : nr.touches + " träffar"}` : "Ingen nivå över kursen";
+  $("cAtr").textContent = fmt(a);
+  $("cAtrSub").textContent = num1(a/close*100) + " % av kursen";
+  const card = $("cSigCard");
+  card.className = "card" + (active ? " signal-" + active.side : "");
+  if (active){
+    $("cSig").innerHTML = active.side === "long" ? `<span class="sup">LONG</span>` : `<span class="res">SHORT</span>`;
+    $("cSigSub").textContent = `${active.kind} ${active.date} · stopp ${fmt(active.stop)} · mål ${fmt(active.target)} · R/R ${num1(active.rr)}`;
+  } else {
+    $("cSig").innerHTML = `<span class="muted">Neutral</span>`;
+    $("cSigSub").textContent = "Ingen aktiv signal de senaste 10 dagarna";
+  }
+
+  // Diagram
+  if (!state.chart) buildChart();
+  const cs = state.candleSeries;
+  cs.setData(c.map(r => ({time:r[0], open:r[1], high:r[2], low:r[3], close:r[4]})));
+  const up = css("--sup"), dn = css("--res");
+  state.volSeries.setData(c.map(r => ({time:r[0], value:r[5]||0, color:(r[4]>=r[1]?up:dn) + "55"})));
+  state.priceLines.forEach(pl => cs.removePriceLine(pl));
+  state.priceLines = [];
+  const S = LightweightCharts.LineStyle;
+  const line = (price, color, title, extra = {}) => state.priceLines.push(cs.createPriceLine({price, color, lineWidth:1, lineStyle:S.Solid, axisLabelVisible:true, title, ...extra}));
+  sup.forEach((l,i) => line(l.price, up, l.extreme ? "Periodens botten" : `Stöd (${l.touches})`, {lineWidth: i===0?2:1}));
+  res.forEach((l,i) => line(l.price, dn, l.extreme ? "Periodens topp" : `Motstånd (${l.touches})`, {lineWidth: i===0?2:1}));
+  if (piv) piv.forEach(([name, p]) => line(p, css("--piv"), name, {lineStyle:S.Dashed, axisLabelVisible:false}));
+  if (active && $("showSig").checked){
+    line(active.stop, css("--muted"), "Stopp", {lineStyle:S.Dotted});
+    line(active.target, css("--accent"), "Mål", {lineStyle:S.Dotted});
+  }
+  const marks = [];
+  if ($("markers").checked) LV.pts.forEach(p => marks.push({time:all[p.i][0], position: p.kind==="high" ? "aboveBar" : "belowBar",
+    color: (p.kind==="high" ? dn : up) + "99", shape:"circle", size:0.5}));
+  if ($("showSig").checked) sigs.forEach(s => marks.push({time:s.date, position: s.side==="long" ? "belowBar" : "aboveBar",
+    color: s.side==="long" ? up : dn, shape: s.side==="long" ? "arrowUp" : "arrowDown", text: s.side==="long" ? "L" : "S", size:1.2}));
+  marks.sort((x,y)=> x.time < y.time ? -1 : x.time > y.time ? 1 : 0);
+  cs.setMarkers(marks);
+  state.chart.timeScale().fitContent();
+
+  // Signaltabell + statistik
+  const closed = sigs.filter(s => s.out.res !== "open");
+  const wins = closed.filter(s => s.out.res === "win").length;
+  const avgR = closed.length ? closed.reduce((a,s)=>a+s.out.r,0)/closed.length : 0;
+  $("sigStats").innerHTML = sigs.length
+    ? `<span>Signaler: <b>${sigs.length}</b> (${sigs.filter(s=>s.side==="long").length} long, ${sigs.filter(s=>s.side==="short").length} short)</span>
+       <span>Avslutade: <b>${closed.length}</b></span>
+       <span>Träffsäkerhet: <b>${closed.length ? Math.round(100*wins/closed.length) + " %" : "–"}</b></span>
+       <span>Snitt per affär: <b class="${avgR>=0?"sup":"res"}">${closed.length ? (avgR>=0?"+":"") + num1(avgR) + " R" : "–"}</b></span>`
+    : `<span class="muted">Inga signaler i perioden med nuvarande inställningar.</span>`;
+  $("sigRows").innerHTML = [...sigs].reverse().slice(0, 15).map(s =>
+    `<tr><td>${s.date}</td><td class="l">${sigTag(s)}</td><td class="l">${s.kind}</td><td>${fmt(s.entry)}</td><td>${fmt(s.stop)}</td><td>${fmt(s.target)}</td><td>${num1(s.rr)}</td><td class="l">${outText(s.out)}</td></tr>`).join("");
+
+  // Nivåtabell
+  const rows = [
+    ...res.map(l => ({...l, type:"res"})), ...sup.map(l => ({...l, type:"sup"})),
+    ...(piv ? piv.map(([name,p]) => ({type:"piv", name, price:p})) : []),
+    {type:"cur", price:close},
+  ].sort((x,y)=>y.price-x.price);
+  const stars = s => { if (!s) return "–"; const k = Math.max(1, Math.round(5 * s / maxScore)); return "★".repeat(k) + "☆".repeat(5-k); };
+  $("levels").innerHTML = rows.map(r => {
+    if (r.type === "cur") return `<tr class="current"><td>Aktuell kurs</td><td>${fmt(r.price)}</td><td></td><td></td><td>${last[0]}</td><td></td></tr>`;
+    const dist = pct((r.price/close-1)*100);
+    if (r.type === "piv") return `<tr><td><span class="tag piv">Pivot ${r.name}</span></td><td>${fmt(r.price)}</td><td>${dist}</td><td class="muted">–</td><td class="muted">–</td><td class="muted">–</td></tr>`;
+    const tag = r.type === "sup" ? `<span class="tag sup">${r.extreme?"Stöd (periodens botten)":"Stöd"}</span>` : `<span class="tag res">${r.extreme?"Motstånd (periodens topp)":"Motstånd"}</span>`;
+    return `<tr><td>${tag}</td><td>${fmt(r.price)}</td><td>${dist}</td><td title="${r.highs} toppar, ${r.lows} bottnar">${r.touches}</td><td>${r.lastDate}</td><td class="stars">${stars(r.score)}</td></tr>`;
+  }).join("");
+}
+
+/* ---------- Data ---------- */
+function showMessage(html){ $("message").innerHTML = html; $("message").hidden = false; }
+
+function showData(d){
+  if (!d.candles || d.candles.length < 80){ showMessage("För lite kursdata (minst 80 dagar behövs)."); return; }
+  d.candles.sort((a,b)=> a[0] < b[0] ? -1 : 1);
+  state.data = d;
+  $("title").textContent = d.name && d.name !== d.symbol ? d.name : d.symbol;
+  $("subtitle").textContent = (d.name && d.name !== d.symbol ? d.symbol + " · " : "") + d.candles.length + " handelsdagar" + (d.source ? " · " + d.source : "");
+  $("content").hidden = false; $("message").hidden = true;
+  render();
+}
+
+async function fetchStock(item){
+  if (state.cache.has(item.symbol)) return state.cache.get(item.symbol);
+  const r = await fetch("data/" + item.file, {cache:"no-cache"});
+  if (!r.ok) throw new Error(r.status);
+  const d = await r.json();
+  d.candles.sort((a,b)=> a[0] < b[0] ? -1 : 1);
+  state.cache.set(item.symbol, d);
+  return d;
+}
+
+async function loadSymbol(sym){
+  setView("chart");
+  const item = state.index.find(s => s.symbol.toLowerCase() === sym.toLowerCase());
+  if (!item){ showMessage(`<b>${esc(sym)}</b> finns inte i listan. Lägg till den i <code>watchlist.txt</code> eller ladda upp en CSV-fil.`); return; }
+  try {
+    showData(await fetchStock(item));
+    $("search").value = item.symbol;
+    history.replaceState(null, "", "#" + encodeURIComponent(item.symbol));
+    try { localStorage.setItem("sr-last", item.symbol); } catch {}
+  } catch { showMessage("Kunde inte läsa kursdata för " + esc(item.symbol) + "."); }
+}
+
+async function loadIndex(){
+  try {
+    const r = await fetch("data/index.json", {cache:"no-cache"});
+    if (!r.ok) throw new Error(r.status);
+    const idx = await r.json();
+    state.index = idx.stocks || [];
+    $("stocklist").innerHTML = state.index.map(s => `<option value="${esc(s.symbol)}">${esc(s.name||"")}</option>`).join("");
+    if (idx.updated) $("updated").textContent = state.index.length + " aktier · uppdaterad " + new Date(idx.updated).toLocaleString("sv-SE",{dateStyle:"short",timeStyle:"short"});
+  } catch { state.index = []; }
+  let start = decodeURIComponent(location.hash.slice(1));
+  if (!start){ try { start = localStorage.getItem("sr-last") || ""; } catch {} }
+  if (!start && state.index.length) start = state.index[0].symbol;
+  if (start && state.index.length) loadSymbol(start);
+  else showMessage(`Ingen kursdata hittades än. Den hämtas automatiskt av GitHub Actions när sidan publiceras.<br><br>
+    Du kan redan nu <button class="primary" onclick="$('csvFile').click()">ladda upp en CSV-fil</button> eller <button onclick="showData(demoData())">visa demo</button>`);
+}
+
+/* ---------- Signalöversikt ---------- */
+let scanToken = 0;
+async function runScan(){
+  const token = ++scanToken;
+  const o = opts(), days = +$("scanDays").value, side = $("scanSide").value, onlyActive = $("scanActive").checked;
+  if (!state.index.length){ $("scanStatus").textContent = "Ingen kursdata finns än."; $("scanRows").innerHTML = ""; return; }
+  const results = []; let done = 0;
+  const queue = [...state.index];
+  const draw = () => {
+    const rows = results
+      .filter(r => side === "all" || r.s.side === side)
+      .filter(r => !onlyActive || r.s.out.res === "open")
+      .sort((x,y) => x.s.date === y.s.date ? y.s.rr - x.s.rr : (x.s.date < y.s.date ? 1 : -1));
+    $("scanRows").innerHTML = rows.length ? rows.map(r => `<tr class="click" data-sym="${esc(r.item.symbol)}">
+      <td><b>${esc(r.item.symbol)}</b> <span class="muted small">${esc((r.item.name||"").slice(0,28))}</span></td>
+      <td>${fmt(r.close)}</td><td class="l">${sigTag(r.s)}</td><td class="l">${r.s.kind}</td><td>${r.s.date}</td>
+      <td>${fmt(r.s.stop)}</td><td>${fmt(r.s.target)}</td><td>${num1(r.s.rr)}</td><td class="l">${outText(r.s.out)}</td></tr>`).join("")
+      : `<tr><td colspan="9" class="muted" style="text-align:center;padding:20px">${done < state.index.length ? "Letar…" : "Inga signaler med valda filter."}</td></tr>`;
+    $("scanStatus").textContent = done < state.index.length
+      ? `Skannar ${done} av ${state.index.length} aktier…`
+      : `${rows.length} ${rows.length === 1 ? "signal" : "signaler"} bland ${state.index.length} aktier.`;
+  };
+  const worker = async () => {
+    while (queue.length && token === scanToken){
+      const item = queue.shift();
+      try {
+        const d = await fetchStock(item);
+        const all = d.candles, T = all.length - 1;
+        if (T > 80){
+          const ctx = prepare(all, o.k);
+          // senaste signalen inom vald tidsperiod
+          const sigs = signalsInRange(ctx, Math.max(1, T - days + 1 - o.k), T, o).filter(s => T - s.t < days);
+          if (sigs.length) results.push({item, close: all[T][4], s: sigs[sigs.length-1]});
+        }
+      } catch {}
+      done++;
+      if (token === scanToken && (done % 8 === 0 || done === state.index.length)) draw();
+    }
+  };
+  draw();
+  await Promise.all(Array.from({length:6}, worker));
+  if (token === scanToken) draw();
+}
+$("scanRows").addEventListener("click", e => { const tr = e.target.closest("tr[data-sym]"); if (tr) loadSymbol(tr.dataset.sym); });
+["scanDays","scanSide","scanActive"].forEach(id => $(id).addEventListener("change", runScan));
+
+function setView(v){
+  $("viewChart").hidden = v !== "chart"; $("viewScan").hidden = v !== "scan";
+  $("tabChart").classList.toggle("on", v === "chart"); $("tabScan").classList.toggle("on", v === "scan");
+  if (v === "scan") runScan();
+}
+$("tabChart").onclick = () => setView("chart");
+$("tabScan").onclick = () => setView("scan");
+
+/* ---------- CSV ---------- */
+function parseCSV(text, filename){
+  text = text.replace(/^﻿/, "");
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  const first = lines[0];
+  const delim = first.includes("\t") ? "\t" : (first.split(";").length > first.split(",").length ? ";" : ",");
+  const head = first.split(delim).map(h => h.trim().replace(/"/g,"").toLowerCase());
+  const find = (...names) => head.findIndex(h => names.some(n => h === n || h.startsWith(n)));
+  const ci = {
+    d: find("date","datum","time","tid"), o: find("open","öppning","öppen"), h: find("high","högst","hög"),
+    l: find("low","lägst","låg"), c: find("close","stängning","senast","slut","adj close"), v: find("volume","volym","total volym","vol"),
+  };
+  if (ci.d < 0 || ci.c < 0) throw new Error("Hittar inga kolumner för datum och stängningskurs.");
+  const num = s => { if (s == null) return NaN; s = s.replace(/"/g,"").replace(/\s/g,"").replace(/^\$/,""); if (delim !== ",") s = s.replace(",", "."); return parseFloat(s); };
+  const candles = [];
+  for (const line of lines.slice(1)){
+    const f = line.split(delim);
+    let date = (f[ci.d]||"").replace(/"/g,"").trim();
+    const us = date.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (us) date = `${us[3]}-${us[1].padStart(2,"0")}-${us[2].padStart(2,"0")}`;
+    date = date.slice(0,10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const c = num(f[ci.c]);
+    const o = ci.o>=0 ? num(f[ci.o]) : c, h = ci.h>=0 ? num(f[ci.h]) : Math.max(o,c), l = ci.l>=0 ? num(f[ci.l]) : Math.min(o,c);
+    if (![o,h,l,c].every(isFinite)) continue;
+    candles.push([date, o||c, Math.max(h,o,c), Math.min(l,o,c), c, ci.v>=0 ? (num(f[ci.v])||0) : 0]);
+  }
+  const uniq = [...new Map(candles.map(r => [r[0], r])).values()];
+  const name = filename.replace(/\.[^.]+$/, "");
+  return { symbol:name, name, currency:"", candles:uniq, source:"uppladdad fil" };
+}
+
+$("csvBtn").onclick = () => $("csvFile").click();
+$("csvFile").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  setView("chart");
+  try { showData(parseCSV(await f.text(), f.name)); history.replaceState(null,"",location.pathname); }
+  catch (err){ showMessage("Kunde inte läsa filen: " + esc(err.message) + "<br><span class='muted small'>Filen behöver kolumner för Datum och Stängning (Close), gärna även Öppning, Högst, Lägst och Volym.</span>"); }
+  e.target.value = "";
+};
+
+/* ---------- Demo (syntetisk data) ---------- */
+function demoData(){
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const candles = []; let p = 100; const d = new Date(Date.UTC(2024, 0, 2));
+  while (candles.length < 600){
+    if (d.getUTCDay() % 6 !== 0){
+      const drift = Math.sin(candles.length / 45) * 0.004;
+      const o = p, c = Math.max(5, o * (1 + drift + (rnd() - 0.5) * 0.035));
+      const h = Math.max(o, c) * (1 + rnd() * 0.012), l = Math.min(o, c) * (1 - rnd() * 0.012);
+      candles.push([d.toISOString().slice(0,10), o, h, l, c, Math.round(1e6 * (0.5 + rnd()))]); p = c;
+    }
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return { symbol:"DEMO", name:"Demo", currency:"", candles, source:"syntetisk data, inte en riktig aktie" };
+}
+
+/* ---------- Händelser ---------- */
+$("search").addEventListener("change", e => { const v = e.target.value.trim(); if (v) loadSymbol(v); });
+["period","win","tol","minT","maxN","pivBase","markers","showSig","trend","minRR"].forEach(id => $(id).addEventListener("input", render));
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { state.chart?.remove(); state.chart = null; render(); });
+loadIndex();
+</script>
+</body>
+</html>
