@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stöd &amp; Motstånd</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#fff; --text:#16181d; --muted:#626a77; --border:#dfe3e8;
+  --accent:#2a62d9; --sup:#138a52; --sup-bg:#e3f4ea; --res:#c8323a; --res-bg:#fbe6e7;
+  --piv:#8a6d12; --grid:#eceef2;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f1115; --panel:#171a20; --text:#e6e8ec; --muted:#959cab; --border:#2a2f38;
+    --accent:#6f9bff; --sup:#3ccf86; --sup-bg:#13291f; --res:#ff6b72; --res-bg:#311719;
+    --piv:#e0bd4f; --grid:#21252d;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border);background:var(--panel)}
+h1{font-size:18px;margin:0 12px 0 0;white-space:nowrap}
+main{max-width:1200px;margin:0 auto;padding:16px}
+input,select,button{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:7px 10px}
+button{cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+#search{min-width:0;flex:1 1 220px;max-width:360px}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
+.card .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.card .value{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+.card .sub{font-size:13px;color:var(--muted)}
+.sup{color:var(--sup)} .res{color:var(--res)}
+.layout{display:grid;grid-template-columns:1fr 280px;gap:14px}
+@media (max-width:900px){.layout{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px}
+#chart{height:480px;width:100%}
+@media (max-width:600px){#chart{height:360px}}
+.settings label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+.settings label:first-child{margin-top:0}
+.settings input[type=range]{width:100%;padding:0}
+.settings select{width:100%}
+.settings .row{display:flex;justify-content:space-between;align-items:center}
+.check{display:flex!important;gap:8px;align-items:center;color:var(--text)!important}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font-size:12px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+.tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600}
+.tag.sup{background:var(--sup-bg)} .tag.res{background:var(--res-bg)}
+.tag.piv{background:transparent;color:var(--piv);border:1px solid var(--piv)}
+tr.current td{font-weight:600;background:var(--bg)}
+.table-wrap{overflow-x:auto}
+h2{font-size:16px;margin:0 0 10px}
+.msg{padding:28px;text-align:center}
+.stars{letter-spacing:1px;color:var(--accent)}
+footer{max-width:1200px;margin:0 auto;padding:4px 16px 30px;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Stöd &amp; Motstånd</h1>
+  <input id="search" list="stocklist" placeholder="Sök aktie, t.ex. VOLV-B.ST" autocomplete="off">
+  <datalist id="stocklist"></datalist>
+  <button id="csvBtn" title="Ladda upp egen kursdata (CSV)">Ladda upp CSV</button>
+  <input id="csvFile" type="file" accept=".csv,.txt" hidden>
+  <span id="updated" class="muted small"></span>
+</header>
+
+<main>
+  <div id="content" hidden>
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <h2 id="title" style="font-size:20px;margin:0"></h2>
+      <span id="subtitle" class="muted small"></span>
+    </div>
+    <div class="cards">
+      <div class="card"><div class="label">Senaste kurs</div><div class="value" id="cLast">–</div><div class="sub" id="cLastSub"></div></div>
+      <div class="card"><div class="label">Närmaste stöd</div><div class="value sup" id="cSup">–</div><div class="sub" id="cSupSub"></div></div>
+      <div class="card"><div class="label">Närmaste motstånd</div><div class="value res" id="cRes">–</div><div class="sub" id="cResSub"></div></div>
+      <div class="card"><div class="label">ATR (14)</div><div class="value" id="cAtr">–</div><div class="sub" id="cAtrSub"></div></div>
+    </div>
+
+    <div class="layout">
+      <div class="panel" style="padding:8px"><div id="chart"></div></div>
+      <div class="panel settings">
+        <label for="period">Period</label>
+        <select id="period">
+          <option value="126">6 månader</option>
+          <option value="252" selected>1 år</option>
+          <option value="504">2 år</option>
+          <option value="1260">5 år</option>
+        </select>
+        <label for="win"><span class="row"><span>Känslighet (svängfönster)</span><b id="winV"></b></span></label>
+        <input id="win" type="range" min="2" max="20" value="5">
+        <label for="tol"><span class="row"><span>Zonbredd (× ATR)</span><b id="tolV"></b></span></label>
+        <input id="tol" type="range" min="0.2" max="2" step="0.1" value="0.6">
+        <label for="minT"><span class="row"><span>Minsta antal träffar</span><b id="minTV"></b></span></label>
+        <input id="minT" type="range" min="1" max="5" value="2">
+        <label for="maxN"><span class="row"><span>Nivåer per sida</span><b id="maxNV"></b></span></label>
+        <input id="maxN" type="range" min="1" max="8" value="4">
+        <label for="pivBase">Klassiska pivotpunkter</label>
+        <select id="pivBase">
+          <option value="off">Visa inte</option>
+          <option value="day">Från senaste dagen</option>
+          <option value="week" selected>Från förra veckan</option>
+          <option value="month">Från förra månaden</option>
+        </select>
+        <label class="check"><input type="checkbox" id="markers"> Markera svängpunkter i grafen</label>
+        <p class="muted small" style="margin:12px 0 0">Nivåerna räknas fram ur svängtoppar och -bottnar som grupperas när de ligger inom zonbredden. Fler träffar och färskare träffar ger högre styrka.</p>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:14px">
+      <h2>Nivåer</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Typ</th><th>Nivå</th><th>Avstånd</th><th>Träffar</th><th>Senast testad</th><th>Styrka</th></tr></thead>
+          <tbody id="levels"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="message" class="panel msg"></div>
+</main>
+<footer>Endast i informationssyfte – inte investeringsrådgivning. Kursdata från Yahoo Finance via yfinance. Grafer: TradingView Lightweight Charts™.</footer>
+
+<script src="vendor/lightweight-charts.standalone.production.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const state = { index: [], data: null, chart: null, candleSeries: null, volSeries: null, priceLines: [] };
+
+/* ---------- Formatering ---------- */
+let currency = "";
+function fmt(x){
+  if (x == null || !isFinite(x)) return "–";
+  const d = Math.abs(x) >= 1000 ? 0 : Math.abs(x) >= 10 ? 2 : 3;
+  return x.toLocaleString("sv-SE", {minimumFractionDigits:d, maximumFractionDigits:d});
+}
+const pct = x => (x > 0 ? "+" : "") + x.toLocaleString("sv-SE",{minimumFractionDigits:1,maximumFractionDigits:1}) + " %";
+
+/* ---------- Beräkningar ---------- */
+function atr(c, n = 14){
+  if (c.length < 2) return 0;
+  const trs = [];
+  for (let i = 1; i < c.length; i++){
+    const [, , h, l] = c[i], pc = c[i-1][4];
+    trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  const last = trs.slice(-n);
+  return last.reduce((a,b)=>a+b,0) / last.length;
+}
+
+function findPivots(c, k){
+  const piv = [];
+  for (let i = k; i < c.length - k; i++){
+    let isHigh = true, isLow = true;
+    for (let j = i - k; j <= i + k; j++){
+      if (j === i) continue;
+      if (c[j][2] > c[i][2]) isHigh = false;
+      if (c[j][3] < c[i][3]) isLow = false;
+      if (!isHigh && !isLow) break;
+    }
+    if (isHigh) piv.push({i, price:c[i][2], kind:"high"});
+    if (isLow)  piv.push({i, price:c[i][3], kind:"low"});
+  }
+  return piv;
+}
+
+function clusterLevels(c, pivots, tol){
+  const n = c.length;
+  const sorted = [...pivots].sort((a,b)=>a.price-b.price);
+  const clusters = [];
+  for (const p of sorted){
+    const cl = clusters[clusters.length-1];
+    if (cl && p.price - cl.min <= tol) { cl.pts.push(p); }
+    else clusters.push({min:p.price, pts:[p]});
+  }
+  return clusters.map(cl => {
+    // Färskare träffar väger tyngre (0.4 → 1.0)
+    let wSum = 0, pSum = 0;
+    for (const p of cl.pts){ const w = 0.4 + 0.6 * p.i / (n - 1); wSum += w; pSum += w * p.price; }
+    const lastI = Math.max(...cl.pts.map(p=>p.i));
+    return {
+      price: pSum / wSum,
+      touches: cl.pts.length,
+      score: wSum,
+      lastDate: c[lastI][0],
+      highs: cl.pts.filter(p=>p.kind==="high").length,
+      lows: cl.pts.filter(p=>p.kind==="low").length,
+    };
+  });
+}
+
+function classicPivots(all, base){
+  if (base === "off" || all.length < 2) return null;
+  let rows;
+  const lastDate = new Date(all[all.length-1][0]);
+  if (base === "day") rows = [all[all.length-1]];
+  else {
+    const key = base === "week"
+      ? d => { const x = new Date(d); const day = (x.getUTCDay()+6)%7; x.setUTCDate(x.getUTCDate()-day); return x.toISOString().slice(0,10); }
+      : d => d.slice(0,7);
+    const curKey = key(all[all.length-1][0]);
+    let prevKey = null;
+    for (let i = all.length-1; i >= 0; i--){
+      const k = key(all[i][0]);
+      if (k !== curKey){ prevKey = k; break; }
+    }
+    if (!prevKey) return null;
+    rows = all.filter(r => key(r[0]) === prevKey);
+  }
+  const H = Math.max(...rows.map(r=>r[2])), L = Math.min(...rows.map(r=>r[3])), C = rows[rows.length-1][4];
+  const P = (H + L + C) / 3;
+  return [
+    ["R3", H + 2*(P - L)], ["R2", P + (H - L)], ["R1", 2*P - L], ["P", P],
+    ["S1", 2*P - H], ["S2", P - (H - L)], ["S3", L - 2*(H - P)],
+  ];
+}
+
+/* ---------- Diagram ---------- */
+function buildChart(){
+  const el = $("chart");
+  el.innerHTML = "";
+  const chart = LightweightCharts.createChart(el, {
+    autoSize: true,
+    layout: { background:{type:"solid", color:css("--panel")}, textColor:css("--muted"), fontFamily:"system-ui, sans-serif" },
+    grid: { vertLines:{color:css("--grid")}, horzLines:{color:css("--grid")} },
+    rightPriceScale: { borderColor:css("--border") },
+    timeScale: { borderColor:css("--border") },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    localization: { locale: "sv-SE" },
+  });
+  state.candleSeries = chart.addCandlestickSeries({
+    upColor:css("--sup"), downColor:css("--res"), borderVisible:false,
+    wickUpColor:css("--sup"), wickDownColor:css("--res"),
+  });
+  state.volSeries = chart.addHistogramSeries({ priceScaleId:"vol", priceFormat:{type:"volume"}, lastValueVisible:false, priceLineVisible:false });
+  chart.priceScale("vol").applyOptions({ scaleMargins:{top:0.85, bottom:0} });
+  state.chart = chart;
+}
+
+/* ---------- Rendering ---------- */
+function setLabels(){
+  $("winV").textContent = $("win").value + " dagar";
+  $("tolV").textContent = (+$("tol").value).toFixed(1);
+  $("minTV").textContent = $("minT").value;
+  $("maxNV").textContent = $("maxN").value;
+}
+
+function render(){
+  setLabels();
+  const d = state.data; if (!d) return;
+  const all = d.candles;
+  const c = all.slice(-(+$("period").value));
+  const k = +$("win").value, tolF = +$("tol").value, minT = +$("minT").value, maxN = +$("maxN").value;
+  const last = c[c.length-1], close = last[4], prev = c.length > 1 ? c[c.length-2][4] : close;
+  const a = atr(c);
+  const tol = Math.max(a * tolF, close * 0.002);
+
+  const pivots = findPivots(c, k);
+  const levels = clusterLevels(c, pivots, tol).filter(l => l.touches >= minT);
+  const maxScore = Math.max(1e-9, ...levels.map(l=>l.score));
+  const sup = levels.filter(l => l.price < close).sort((x,y)=>y.score-x.score).slice(0,maxN).sort((x,y)=>y.price-x.price);
+  const res = levels.filter(l => l.price >= close).sort((x,y)=>y.score-x.score).slice(0,maxN).sort((x,y)=>x.price-y.price);
+  // Saknas nivå på någon sida (t.ex. vid ny botten/topp) används periodens lägsta/högsta
+  const extreme = (pick, kind) => { let bi = 0; c.forEach((r,i) => { if (pick(r[kind==="low"?3:2], c[bi][kind==="low"?3:2])) bi = i; });
+    return {price:c[bi][kind==="low"?3:2], touches:1, score:0, lastDate:c[bi][0], highs:kind==="high"?1:0, lows:kind==="low"?1:0, extreme:true}; };
+  if (!sup.length){ const e = extreme((a,b)=>a<b, "low"); if (e.price < close) sup.push(e); }
+  if (!res.length){ const e = extreme((a,b)=>a>b, "high"); if (e.price > close) res.push(e); }
+  const piv = classicPivots(all, $("pivBase").value);
+
+  // Kort
+  currency = d.currency || "";
+  $("cLast").textContent = fmt(close) + (currency ? " " + currency : "");
+  const chg = (close/prev - 1) * 100;
+  $("cLastSub").innerHTML = `<span class="${chg>=0?"sup":"res"}">${pct(chg)}</span> · ${last[0]}`;
+  const ns = sup[0], nr = res[0];
+  $("cSup").textContent = ns ? fmt(ns.price) : "–";
+  $("cSupSub").textContent = ns ? `${pct((ns.price/close-1)*100)} · ${ns.extreme ? "periodens botten" : ns.touches + " träffar"}` : "Ingen nivå under kursen";
+  $("cRes").textContent = nr ? fmt(nr.price) : "–";
+  $("cResSub").textContent = nr ? `${pct((nr.price/close-1)*100)} · ${nr.extreme ? "periodens topp" : nr.touches + " träffar"}` : "Ingen nivå över kursen";
+  $("cAtr").textContent = fmt(a);
+  $("cAtrSub").textContent = pct(a/close*100).replace("+","") + " av kursen";
+
+  // Diagram
+  if (!state.chart) buildChart();
+  const cs = state.candleSeries;
+  cs.setData(c.map(r => ({time:r[0], open:r[1], high:r[2], low:r[3], close:r[4]})));
+  const up = css("--sup"), dn = css("--res");
+  state.volSeries.setData(c.map(r => ({time:r[0], value:r[5]||0, color:(r[4]>=r[1]?up:dn) + "55"})));
+  state.priceLines.forEach(pl => cs.removePriceLine(pl));
+  state.priceLines = [];
+  const S = LightweightCharts.LineStyle;
+  sup.forEach((l,i) => state.priceLines.push(cs.createPriceLine({price:l.price, color:up, lineWidth: i===0?2:1, lineStyle:S.Solid, axisLabelVisible:true, title: l.extreme ? "Periodens botten" : `Stöd (${l.touches})`})));
+  res.forEach((l,i) => state.priceLines.push(cs.createPriceLine({price:l.price, color:dn, lineWidth: i===0?2:1, lineStyle:S.Solid, axisLabelVisible:true, title: l.extreme ? "Periodens topp" : `Motstånd (${l.touches})`})));
+  if (piv) piv.forEach(([name, p]) => state.priceLines.push(cs.createPriceLine({price:p, color:css("--piv"), lineWidth:1, lineStyle:S.Dashed, axisLabelVisible:false, title:name})));
+  cs.setMarkers($("markers").checked ? pivots.map(p => ({
+    time:c[p.i][0], position: p.kind==="high" ? "aboveBar" : "belowBar",
+    color: p.kind==="high" ? dn : up, shape: p.kind==="high" ? "arrowDown" : "arrowUp",
+  })).sort((x,y)=> x.time < y.time ? -1 : x.time > y.time ? 1 : 0) : []);
+  state.chart.timeScale().fitContent();
+
+  // Tabell
+  const rows = [
+    ...res.map(l => ({...l, type:"res"})),
+    ...sup.map(l => ({...l, type:"sup"})),
+    ...(piv ? piv.map(([name,p]) => ({type:"piv", name, price:p})) : []),
+    {type:"cur", price:close},
+  ].sort((x,y)=>y.price-x.price);
+  const stars = s => { if (!s) return "–"; const n = Math.max(1, Math.round(5 * s / maxScore)); return "★".repeat(n) + "☆".repeat(5-n); };
+  $("levels").innerHTML = rows.map(r => {
+    if (r.type === "cur") return `<tr class="current"><td>Aktuell kurs</td><td>${fmt(r.price)}</td><td></td><td></td><td>${last[0]}</td><td></td></tr>`;
+    const dist = pct((r.price/close-1)*100);
+    if (r.type === "piv") return `<tr><td><span class="tag piv">Pivot ${r.name}</span></td><td>${fmt(r.price)}</td><td>${dist}</td><td class="muted">–</td><td class="muted">–</td><td class="muted">–</td></tr>`;
+    const tag = r.type === "sup" ? `<span class="tag sup">${r.extreme?"Stöd (periodens botten)":"Stöd"}</span>` : `<span class="tag res">${r.extreme?"Motstånd (periodens topp)":"Motstånd"}</span>`;
+    return `<tr><td>${tag}</td><td>${fmt(r.price)}</td><td>${dist}</td><td title="${r.highs} toppar, ${r.lows} bottnar">${r.touches}</td><td>${r.lastDate}</td><td class="stars">${stars(r.score)}</td></tr>`;
+  }).join("");
+}
+
+/* ---------- Data ---------- */
+function showMessage(html){ $("message").innerHTML = html; $("message").hidden = false; }
+
+function showData(d){
+  if (!d.candles || d.candles.length < 30){ showMessage("För lite kursdata för att räkna fram nivåer (minst 30 dagar behövs)."); return; }
+  d.candles.sort((a,b)=> a[0] < b[0] ? -1 : 1);
+  state.data = d;
+  $("title").textContent = d.name && d.name !== d.symbol ? d.name : d.symbol;
+  $("subtitle").textContent = (d.name && d.name !== d.symbol ? d.symbol + " · " : "") + d.candles.length + " handelsdagar" + (d.source ? " · " + d.source : "");
+  $("content").hidden = false; $("message").hidden = true;
+  render();
+}
+
+async function loadSymbol(sym){
+  const item = state.index.find(s => s.symbol.toLowerCase() === sym.toLowerCase());
+  if (!item){ showMessage(`<b>${sym.replace(/[<>&]/g,"")}</b> finns inte i listan. Lägg till den i <code>watchlist.txt</code> eller ladda upp en CSV-fil.`); return; }
+  try {
+    const r = await fetch("data/" + item.file, {cache:"no-cache"});
+    if (!r.ok) throw new Error(r.status);
+    showData(await r.json());
+    $("search").value = item.symbol;
+    history.replaceState(null, "", "#" + encodeURIComponent(item.symbol));
+    try { localStorage.setItem("sr-last", item.symbol); } catch {}
+  } catch (e){ showMessage("Kunde inte läsa kursdata för " + item.symbol + "."); }
+}
+
+async function loadIndex(){
+  try {
+    const r = await fetch("data/index.json", {cache:"no-cache"});
+    if (!r.ok) throw new Error(r.status);
+    const idx = await r.json();
+    state.index = idx.stocks || [];
+    $("stocklist").innerHTML = state.index.map(s => `<option value="${s.symbol}">${(s.name||"").replace(/[<>&"]/g,"")}</option>`).join("");
+    if (idx.updated) $("updated").textContent = "Data uppdaterad " + new Date(idx.updated).toLocaleString("sv-SE",{dateStyle:"short",timeStyle:"short"});
+  } catch {
+    state.index = [];
+  }
+  let start = decodeURIComponent(location.hash.slice(1));
+  if (!start){ try { start = localStorage.getItem("sr-last") || ""; } catch {} }
+  if (!start && state.index.length) start = state.index[0].symbol;
+  if (start && state.index.length) loadSymbol(start);
+  else showMessage(`Ingen kursdata hittades än. Den hämtas automatiskt av GitHub Actions när sidan publiceras.<br><br>
+    Du kan redan nu <button class="primary" onclick="$('csvFile').click()">ladda upp en CSV-fil</button> eller <button onclick="showData(demoData())">visa demo</button>`);
+}
+
+/* ---------- CSV ---------- */
+function parseCSV(text, filename){
+  text = text.replace(/^﻿/, "");
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  const first = lines[0];
+  const delim = first.includes("\t") ? "\t" : (first.split(";").length > first.split(",").length ? ";" : ",");
+  const head = first.split(delim).map(h => h.trim().replace(/"/g,"").toLowerCase());
+  const find = (...names) => head.findIndex(h => names.some(n => h === n || h.startsWith(n)));
+  const ci = {
+    d: find("date","datum","time","tid"),
+    o: find("open","öppning","öppen"),
+    h: find("high","högst","hög"),
+    l: find("low","lägst","låg"),
+    c: find("close","stängning","senast","slut","adj close"),
+    v: find("volume","volym","total volym","vol"),
+  };
+  if (ci.d < 0 || ci.c < 0) throw new Error("Hittar inga kolumner för datum och stängningskurs.");
+  const num = s => { if (s == null) return NaN; s = s.replace(/"/g,"").replace(/\s/g,""); if (delim !== "," ) s = s.replace(",", "."); return parseFloat(s); };
+  const candles = [];
+  for (const line of lines.slice(1)){
+    const f = line.split(delim);
+    const date = (f[ci.d]||"").replace(/"/g,"").trim().slice(0,10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const c = num(f[ci.c]);
+    const o = ci.o>=0 ? num(f[ci.o]) : c, h = ci.h>=0 ? num(f[ci.h]) : Math.max(o,c), l = ci.l>=0 ? num(f[ci.l]) : Math.min(o,c);
+    if (![o,h,l,c].every(isFinite)) continue;
+    candles.push([date, o||c, Math.max(h,o,c), Math.min(l,o,c), c, ci.v>=0 ? (num(f[ci.v])||0) : 0]);
+  }
+  const uniq = [...new Map(candles.map(r => [r[0], r])).values()];
+  return { symbol: filename.replace(/\.[^.]+$/, ""), name: filename.replace(/\.[^.]+$/, ""), currency:"", candles: uniq, source:"uppladdad fil" };
+}
+
+$("csvBtn").onclick = () => $("csvFile").click();
+$("csvFile").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { showData(parseCSV(await f.text(), f.name)); history.replaceState(null,"",location.pathname); }
+  catch (err){ showMessage("Kunde inte läsa filen: " + String(err.message).replace(/[<>&]/g,"") + "<br><span class='muted small'>Filen behöver kolumner för Datum (ÅÅÅÅ-MM-DD) och Stängning, gärna även Öppning, Högst, Lägst och Volym.</span>"); }
+  e.target.value = "";
+};
+
+/* ---------- Demo (syntetisk data) ---------- */
+function demoData(){
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const candles = []; let p = 100; const d = new Date(Date.UTC(2024, 0, 2));
+  while (candles.length < 600){
+    if (d.getUTCDay() % 6 !== 0){
+      const drift = Math.sin(candles.length / 45) * 0.004;
+      const o = p, c = Math.max(5, o * (1 + drift + (rnd() - 0.5) * 0.035));
+      const h = Math.max(o, c) * (1 + rnd() * 0.012), l = Math.min(o, c) * (1 - rnd() * 0.012);
+      candles.push([d.toISOString().slice(0,10), o, h, l, c, Math.round(1e6 * (0.5 + rnd()))]); p = c;
+    }
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return { symbol:"DEMO", name:"Demo", currency:"", candles, source:"syntetisk data, inte en riktig aktie" };
+}
+
+/* ---------- Händelser ---------- */
+$("search").addEventListener("change", e => { const v = e.target.value.trim(); if (v) loadSymbol(v); });
+["period","win","tol","minT","maxN","pivBase","markers"].forEach(id => $(id).addEventListener("input", render));
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { state.chart?.remove(); state.chart = null; render(); });
+loadIndex();
+</script>
+</body>
+</html>

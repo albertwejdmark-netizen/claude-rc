@@ -1,0 +1,21 @@
+# Aktier som hämtas automatiskt (Yahoo Finance-symboler), en per rad.
+# Svenska aktier har suffixet .ST. Rader som börjar med # ignoreras.
+^OMX
+VOLV-B.ST
+ERIC-B.ST
+HM-B.ST
+ATCO-A.ST
+INVE-B.ST
+SEB-A.ST
+SAND.ST
+ABB.ST
+AZN.ST
+EVO.ST
+SAAB-B.ST
+AAPL
+MSFT
+NVDA
+TSLA
+AMZN
+GOOGL
+META
