@@ -129,8 +129,52 @@ footer{max-width:1200px;margin:0 auto;padding:4px 16px 30px;font-size:12px;color
           <label class="check"><input type="checkbox" id="markers"> Markera svängpunkter</label>
 
           <h3>Signaler</h3>
+          <label for="preset">Strategi</label>
+          <select id="preset">
+            <option value="breakout">Utbrott med volym (rekommenderad)</option>
+            <option value="bounce">Studs på stöd – högst träffsäkerhet</option>
+            <option value="classic">Ursprungliga reglerna</option>
+            <option value="custom">Egna inställningar</option>
+          </select>
+          <p id="presetInfo" class="muted small" style="margin:6px 0 0"></p>
           <label class="check"><input type="checkbox" id="showSig" checked> Visa long-signaler i grafen</label>
-          <label class="check"><input type="checkbox" id="trend" checked> Bara när kursen är över SMA 50</label>
+          <label for="types">Signaltyp</label>
+          <select id="types">
+            <option value="both">Utbrott och studs på stöd</option>
+            <option value="breakout">Bara utbrott</option>
+            <option value="bounce">Bara studs på stöd</option>
+          </select>
+          <label for="trend">Trendfilter</label>
+          <select id="trend">
+            <option value="none">Av</option>
+            <option value="sma50">Kurs över SMA 50</option>
+            <option value="sma50_200">Kurs över SMA 50 och SMA 50 över SMA 200</option>
+            <option value="rising">Kurs över SMA 50 och SMA 50 stigande</option>
+          </select>
+          <label class="check"><input type="checkbox" id="market"> Bara när S&amp;P 500 är över SMA 200</label>
+          <label for="minVol">Volym vid utbrott</label>
+          <select id="minVol">
+            <option value="0">Inget krav</option>
+            <option value="1.3">Minst 1,3 × snittet</option>
+            <option value="1.8">Minst 1,8 × snittet</option>
+          </select>
+          <label for="minClosePos">Stängning i dagens spann</label>
+          <select id="minClosePos">
+            <option value="0">Inget krav</option>
+            <option value="0.5">Övre halvan</option>
+            <option value="0.75">Översta fjärdedelen</option>
+          </select>
+          <label for="minRespect">Nivåns pålitlighet</label>
+          <select id="minRespect">
+            <option value="0">Inget krav</option>
+            <option value="0.6">Respekterad minst 60 %</option>
+            <option value="0.75">Respekterad minst 75 %</option>
+          </select>
+          <label for="maxRsi">Överköpt (RSI 14)</label>
+          <select id="maxRsi">
+            <option value="0">Inget krav</option>
+            <option value="70">Ingen signal över RSI 70</option>
+          </select>
           <label for="minRR"><span class="row"><span>Minsta risk/belöning (TP1)</span><b id="minRRV"></b></span></label>
           <input id="minRR" type="range" min="0" max="3" step="0.25" value="1">
 
@@ -215,6 +259,7 @@ footer{max-width:1200px;margin:0 auto;padding:4px 16px 30px;font-size:12px;color
 <footer>Endast i informationssyfte – inte investeringsrådgivning. Signalerna är mekaniska regler och historiskt utfall är ingen garanti. Kursdata från Yahoo Finance via yfinance. Grafer: TradingView Lightweight Charts™.</footer>
 
 <script src="vendor/lightweight-charts.standalone.production.js"></script>
+<script src="engine.js"></script>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -235,196 +280,34 @@ const num1 = x => x.toLocaleString("sv-SE",{minimumFractionDigits:1,maximumFract
 function opts(){
   return {
     L: +$("period").value, k: +$("win").value, tolF: +$("tol").value, minT: +$("minT").value,
-    maxN: +$("maxN").value, trend: $("trend").checked, minRR: +$("minRR").value,
+    maxN: +$("maxN").value, minRR: +$("minRR").value,
+    types: $("types").value, trend: $("trend").value, market: $("market").checked,
+    minVol: +$("minVol").value, minClosePos: +$("minClosePos").value,
+    minRespect: +$("minRespect").value, maxRsi: +$("maxRsi").value,
     slMode: $("slMode").value, tpMode: $("tpMode").value,
   };
 }
-
-/* ---------- Förberedelser per aktie ---------- */
-// ATR(14), SMA(50), relativ volym och svängpunkter (korta och långa)
-function prepare(all, k){
-  const n = all.length, atrA = new Array(n).fill(NaN), sma = new Array(n).fill(NaN), rvol = new Array(n).fill(1);
-  const tr = [0];
-  for (let i = 1; i < n; i++){
-    const [, , h, l] = all[i], pc = all[i-1][4];
-    tr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+// Färdiga strategier (från backtestet, se scripts/backtest.js och engine.js)
+const SIG_KEYS = ["types","trend","market","minVol","minClosePos","minRespect","maxRsi","minRR","slMode","tpMode"];
+const PRESET_INFO = {
+  breakout: "Backtest 2025–2026: TP1 nåddes före stoploss i 55 % av affärerna, snitt +0,15 R per affär.",
+  bounce: "Backtest 2025–2026: TP1 nåddes före stoploss i 61 % av affärerna, men små vinster: snitt +0,06 R per affär.",
+  classic: "Backtest 2025–2026: TP1 nåddes före stoploss i 38 % av affärerna, snitt +0,08 R per affär.",
+  custom: "Egna inställningar. Kör backtestet för att se hur de hade fungerat.",
+};
+function applyPreset(name){
+  const p = SR.PRESETS[name];
+  if (p) for (const k of SIG_KEYS){
+    const el = $(k), v = p[k];
+    if (el.type === "checkbox") el.checked = !!v; else el.value = String(v);
   }
-  let trSum = 0, cSum = 0, vSum = 0;
-  for (let i = 0; i < n; i++){
-    if (i >= 1){ trSum += tr[i]; if (i > 14) trSum -= tr[i-14]; }
-    if (i >= 14) atrA[i] = trSum / 14;
-    cSum += all[i][4]; if (i >= 50) cSum -= all[i-50][4];
-    if (i >= 49) sma[i] = cSum / 50;
-    vSum += all[i][5] || 0; if (i >= 50) vSum -= all[i-50][5] || 0;
-    const avg = vSum / Math.min(i + 1, 50);
-    if (avg > 0 && all[i][5]) rvol[i] = Math.min(2.5, Math.max(0.4, all[i][5] / avg));
-  }
-  const pivots = findPivots(all, k);
-  // Svängpunkter som också är toppar/bottnar på längre sikt (3× fönstret) väger tyngre
-  const major = new Set(findPivots(all, k * 3).map(p => p.kind + p.i));
-  pivots.forEach(p => { p.major = major.has(p.kind + p.i); p.rvol = rvol[p.i]; });
-  return { all, atrA, sma, pivots, k };
+  $("preset").value = name;
+  $("presetInfo").textContent = PRESET_INFO[name] || "";
 }
+applyPreset("breakout");
 
-function findPivots(c, k){
-  const piv = [];
-  for (let i = k; i < c.length - k; i++){
-    let isHigh = true, isLow = true;
-    for (let j = i - k; j <= i + k; j++){
-      if (j === i) continue;
-      if (c[j][2] > c[i][2]) isHigh = false;
-      if (c[j][3] < c[i][3]) isLow = false;
-      if (!isHigh && !isLow) break;
-    }
-    if (isHigh) piv.push({i, price:c[i][2], kind:"high"});
-    if (isLow)  piv.push({i, price:c[i][3], kind:"low"});
-  }
-  return piv;
-}
-
-/* ---------- Stöd & motstånd ----------
-   1. Svängpunkter (bara bekräftade, ingen framåtblick) grupperas när de ligger
-      inom zonbredden från gruppens snitt. Närliggande grupper slås ihop.
-   2. Varje svängpunkt väger: färskhet × volym × (1,5 om den syns på längre sikt).
-   3. Nivån testas mot alla dagar i perioden: hur ofta vände kursen i zonen
-      jämfört med hur ofta den stängde igenom? (Respekterad %)
-   4. Nivåer med både toppar och bottnar (rollbyte) får en bonus. */
-function levelsAt(ctx, t, o){
-  const { all, atrA, pivots, k } = ctx;
-  const start = Math.max(0, t - o.L + 1);
-  const pts = pivots.filter(p => p.i >= start && p.i <= t - k);
-  const a = isFinite(atrA[t]) ? atrA[t] : all[t][4] * 0.02, close = all[t][4];
-  const tol = Math.max(a * o.tolF, close * 0.002);
-  const span = Math.max(1, t - start);
-  const weight = p => (0.4 + 0.6 * (p.i - start) / span) * Math.sqrt(p.rvol) * (p.major ? 1.5 : 1);
-
-  // Gruppering mot gruppens viktade snitt
-  const sorted = [...pts].sort((x,y)=>x.price-y.price);
-  let clusters = [];
-  for (const p of sorted){
-    const cl = clusters[clusters.length-1];
-    if (cl && p.price - cl.mean <= tol){ cl.pts.push(p); cl.w += weight(p); cl.ps += weight(p) * p.price; cl.mean = cl.ps / cl.w; }
-    else clusters.push({pts:[p], w:weight(p), ps:weight(p)*p.price, mean:p.price});
-  }
-  // Slå ihop grupper som hamnat för nära varandra
-  const merged = [];
-  for (const cl of clusters){
-    const prev = merged[merged.length-1];
-    if (prev && cl.mean - prev.mean <= tol * 0.75){ prev.pts.push(...cl.pts); prev.w += cl.w; prev.ps += cl.ps; prev.mean = prev.ps / prev.w; }
-    else merged.push(cl);
-  }
-
-  const levels = merged.filter(cl => cl.pts.length >= o.minT).map(cl => {
-    const price = cl.mean, lo = price - tol / 2, hi = price + tol / 2;
-    // Respekt: när kursen nådde zonen, vände den eller bröt den igenom?
-    let respect = 0, broke = 0, lastTest = -1;
-    for (let i = Math.max(start, 1); i <= t; i++){
-      const [, , h, l, c] = all[i], pc = all[i-1][4];
-      if (h < lo || l > hi) continue;           // rörde inte zonen
-      lastTest = i;
-      if (pc > hi){ if (c >= lo) respect++; else broke++; }      // kom ovanifrån
-      else if (pc < lo){ if (c <= hi) respect++; else broke++; } // kom underifrån
-    }
-    const respectRatio = (respect + 1) / (respect + broke + 2);
-    const highs = cl.pts.filter(p=>p.kind==="high").length, lows = cl.pts.filter(p=>p.kind==="low").length;
-    const flip = highs > 0 && lows > 0;
-    const lastPivot = Math.max(...cl.pts.map(p=>p.i));
-    const score = cl.w * (0.5 + respectRatio) * (flip ? 1.25 : 1);
-    return { price, lo, hi, touches:cl.pts.length, highs, lows, flip, respect, broke, respectRatio,
-             score, lastDate: all[Math.max(lastPivot, lastTest)][0], major: cl.pts.some(p=>p.major) };
-  });
-  return { levels, tol, a, start, pts };
-}
-
-/* ---------- Stoploss & take profit ---------- */
-function plan(entry, lv, a, tol, o, supportLevel){
-  let stop;
-  if (o.slMode === "level"){
-    const sp = supportLevel ?? [...lv].reverse().find(x => x < entry - 0.25 * a);
-    stop = sp != null ? sp - tol : entry - 2 * a;
-  } else {
-    stop = entry - parseFloat(o.slMode.slice(3)) * a;
-  }
-  const risk = entry - stop;
-  if (!(risk > 0)) return null;
-  let tps;
-  if (o.tpMode === "r") tps = [1, 2, 3].map(r => ({price: entry + r * risk, src: r + "R"}));
-  else {
-    tps = lv.filter(x => x > entry + 0.5 * a).slice(0, 3).map(x => ({price:x, src:"Motstånd"}));
-    let r = Math.max(2, Math.ceil(((tps.length ? tps[tps.length-1].price : entry) - entry) / risk) + 1);
-    while (tps.length < 3){ tps.push({price: entry + r * risk, src: r + "R (inget motstånd)"}); r++; }
-  }
-  return { entry, stop, risk, tps, rr: (tps[0].price - entry) / risk };
-}
-
-/* ---------- Signaler (bara long) ----------
-   Utbrott: stängning över ett motstånd med minst ¼ ATR marginal.
-   Studs:   dagens lägsta når stödzonen, stängning över stödet och grön dag.
-   Nivåerna tas från dagen före, så signalen bygger bara på det man visste då. */
-function signalAt(ctx, t, o){
-  if (t < 60) return null;
-  const { all, sma } = ctx;
-  const LV = levelsAt(ctx, t - 1, o);
-  if (!LV.levels.length) return null;
-  const [date, O, H, Lo, C] = all[t], P = all[t-1][4], a = LV.a, tol = LV.tol;
-  const lv = LV.levels.map(l => l.price).sort((x,y)=>x-y);
-  const upBreaks = lv.filter(x => P <= x && C > x + 0.25 * a);
-  let s = null;
-  if (upBreaks.length){ const x = Math.max(...upBreaks); s = {kind:"Utbrott", level:x}; }
-  else {
-    const below = lv.filter(x => x < C), sp = below.length ? below[below.length-1] : null;
-    if (sp != null && Lo <= sp + tol && C > O && C - sp <= a) s = {kind:"Studs på stöd", level:sp};
-  }
-  if (!s) return null;
-  if (o.trend && isFinite(sma[t]) && C < sma[t]) return null;
-  const pl = plan(C, lv, a, tol, o, s.level);
-  if (!pl || pl.rr < o.minRR) return null;
-  return { ...s, ...pl, t, date, side:"long" };
-}
-
-// Följ upp en signal: vilka TP nåddes innan stoploss?
-function outcome(all, s){
-  let hit = 0;
-  for (let j = s.t + 1; j < all.length; j++){
-    const [, , h, l] = all[j];
-    if (l <= s.stop) return {res: hit ? "win" : "loss", tp:hit, r: hit ? s.rr : -1, date:all[j][0], stopped:true};
-    while (hit < 3 && h >= s.tps[hit].price) hit++;
-    if (hit === 3) return {res:"win", tp:3, r:s.rr, date:all[j][0]};
-  }
-  return hit ? {res:"win", tp:hit, r:s.rr, running:true} : {res:"open", tp:0, r:0};
-}
-
-function signalsInRange(ctx, from, to, o){
-  const out = []; let lastT = -1e9;
-  for (let t = Math.max(from, 60); t <= to; t++){
-    const s = signalAt(ctx, t, o);
-    if (!s || t - lastT < ctx.k) continue; // undvik upprepningar
-    lastT = t;
-    s.out = outcome(ctx.all, s);
-    out.push(s);
-  }
-  return out;
-}
-
-function classicPivots(all, base){
-  if (base === "off" || all.length < 2) return null;
-  let rows;
-  if (base === "day") rows = [all[all.length-1]];
-  else {
-    const key = base === "week"
-      ? d => { const x = new Date(d); const day = (x.getUTCDay()+6)%7; x.setUTCDate(x.getUTCDate()-day); return x.toISOString().slice(0,10); }
-      : d => d.slice(0,7);
-    const curKey = key(all[all.length-1][0]);
-    let prevKey = null;
-    for (let i = all.length-1; i >= 0; i--){ const k = key(all[i][0]); if (k !== curKey){ prevKey = k; break; } }
-    if (!prevKey) return null;
-    rows = all.filter(r => key(r[0]) === prevKey);
-  }
-  const H = Math.max(...rows.map(r=>r[2])), L = Math.min(...rows.map(r=>r[3])), C = rows[rows.length-1][4];
-  const P = (H + L + C) / 3;
-  return [["R3", H + 2*(P - L)], ["R2", P + (H - L)], ["R1", 2*P - L], ["P", P],
-          ["S1", 2*P - H], ["S2", P - (H - L)], ["S3", L - 2*(H - P)]];
-}
+/* Beräkningarna (nivåer, signaler, SL/TP) finns i engine.js */
+const { prepare, levelsAt, plan, signalsInRange, classicPivots, marketRegime } = SR;
 
 /* ---------- Diagram ---------- */
 function buildChart(){
@@ -469,7 +352,7 @@ function render(){
   const d = state.data; if (!d) return;
   const o = opts();
   const all = d.candles, n = all.length, T = n - 1;
-  const ctx = prepare(all, o.k);
+  const ctx = prepare(all, o.k, state.market);
   const LV = levelsAt(ctx, T, o);
   const c = all.slice(LV.start), off = LV.start;
   const last = all[T], close = last[4], prev = n > 1 ? all[T-1][4] : close, a = LV.a;
@@ -640,6 +523,9 @@ async function loadIndex(){
     if (!r.ok) throw new Error(r.status);
     const idx = await r.json();
     state.index = idx.stocks || [];
+    if (idx.market){
+      try { const m = await (await fetch("data/" + idx.market, {cache:"no-cache"})).json(); state.market = marketRegime(m.candles); } catch {}
+    }
     $("stocklist").innerHTML = state.index.map(s => `<option value="${esc(s.symbol)}">${esc(s.name||"")}</option>`).join("");
     if (idx.updated) $("updated").textContent = state.index.length + " aktier · uppdaterad " + new Date(idx.updated).toLocaleString("sv-SE",{dateStyle:"short",timeStyle:"short"});
   } catch { state.index = []; }
@@ -679,7 +565,7 @@ async function runScan(){
         const d = await fetchStock(item);
         const all = d.candles, T = all.length - 1;
         if (T > 80){
-          const ctx = prepare(all, o.k);
+          const ctx = prepare(all, o.k, state.market);
           const sigs = signalsInRange(ctx, Math.max(1, T - days + 1 - o.k), T, o).filter(s => T - s.t < days);
           if (sigs.length) results.push({item, close: all[T][4], s: sigs[sigs.length-1]});
         }
@@ -763,7 +649,9 @@ function demoData(){
 
 /* ---------- Händelser ---------- */
 $("search").addEventListener("change", e => { const v = e.target.value.trim(); if (v) loadSymbol(v); });
-["period","win","tol","minT","maxN","pivBase","zones","markers","showSig","trend","minRR","slMode","tpMode","showPlan"].forEach(id => $(id).addEventListener("input", render));
+["period","win","tol","minT","maxN","pivBase","zones","markers","showSig","showPlan"].forEach(id => $(id).addEventListener("input", render));
+SIG_KEYS.forEach(id => $(id).addEventListener("input", () => { applyPreset("custom"); render(); }));
+$("preset").addEventListener("input", () => { applyPreset($("preset").value); render(); });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { state.chart?.remove(); state.chart = null; render(); });
 loadIndex();
 </script>
