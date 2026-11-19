@@ -4,17 +4,29 @@
   "use strict";
   const E = {};
 
-  E.DEFAULTS = {
-    L: 252, k: 5, tolF: 0.6, minT: 2, maxN: 4,
-    types: "both",        // both | breakout | bounce
-    trend: "sma50",       // none | sma50 | sma50_200 | rising
-    minVol: 0,            // minsta relativa volym vid utbrott (0 = av)
-    minClosePos: 0,       // stängning i övre delen av dagens spann (0–1)
-    minRespect: 0,        // nivån ska ha respekterats minst så här ofta (0–1)
-    market: false,        // bara när S&P 500 (SPY) är över sitt 200-dagars snitt
-    maxRsi: 0,            // högsta RSI(14) vid signal (0 = av)
-    minRR: 1, slMode: "level", tpMode: "levels",
+  /* Färdiga strategier. Siffrorna i kommentarerna kommer från backtestet
+     (scripts/backtest.js) på 122 amerikanska aktier: inställningarna valdes på
+     data före 2025 och kontrollerades på data från 2025 (kontrollsiffror nedan).
+     Vinst = TP1 nås före stoploss. */
+  E.PRESETS = {
+    // Kontroll: 55 % vinst, +0,15 R per affär
+    breakout: { types: "breakout", trend: "none", minVol: 1.8, minClosePos: 0.75, minRespect: 0.6,
+                market: false, maxRsi: 0, minRR: 0, slMode: "atr3", tpMode: "r" },
+    // Kontroll: 61 % vinst, +0,06 R per affär
+    bounce:   { types: "bounce", trend: "sma50", minVol: 0, minClosePos: 0.5, minRespect: 0.6,
+                market: false, maxRsi: 70, minRR: 0, slMode: "atr3", tpMode: "levels" },
+    // Ursprungliga reglerna. Kontroll: 38 % vinst, +0,08 R per affär
+    classic:  { types: "both", trend: "sma50", minVol: 0, minClosePos: 0, minRespect: 0,
+                market: false, maxRsi: 0, minRR: 1, slMode: "level", tpMode: "levels" },
   };
+
+  E.DEFAULTS = Object.assign({
+    L: 252, k: 5, tolF: 0.6, minT: 2, maxN: 4,
+    // types: both | breakout | bounce          trend: none | sma50 | sma50_200 | rising
+    // minVol: relativ volym vid utbrott        minClosePos: stängning i dagens spann (0–1)
+    // minRespect: nivåns respektandel (0–1)    market: S&P 500 över SMA 200
+    // maxRsi: högsta RSI(14), 0 = av          slMode: level | atrX    tpMode: levels | r
+  }, E.PRESETS.breakout);
 
   /* ---------- Förberedelser per aktie ---------- */
   E.prepare = function (all, k, market) {

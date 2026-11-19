@@ -82,7 +82,9 @@ function line(label, m) {
 const baseM = evaluate(base);
 console.log("== Nuvarande standardinställningar ==");
 console.log(line("standard", baseM));
-console.log(line("utan filter (trend=none, minRR=0)", evaluate({ ...base, trend: "none", minRR: 0 })));
+console.log(line("utan filter (trend=none, minRR=0)", evaluate({ ...base, ...SR.PRESETS.classic, trend: "none", minRR: 0 })));
+console.log("\n== Färdiga strategier på hemsidan ==");
+for (const [name, p] of Object.entries(SR.PRESETS)) console.log(line(name, evaluate({ ...base, ...p })));
 
 const GRID = {
   types: ["both", "breakout", "bounce"],
