@@ -1,6 +1,6 @@
 # Stöd & Motstånd
 
-En hemsida som visar stöd- och motståndsnivåer för amerikanska aktier, med candlestick-graf, nivåtabell, klassiska pivotpunkter och long/short-signaler.
+En hemsida som visar stöd- och motståndsnivåer för amerikanska aktier, med candlestick-graf, nivåtabell, klassiska pivotpunkter och long-signaler.
 
 ## Så räknas nivåerna
 1. **Svängpunkter**: en dag räknas som svängtopp/-botten om dess högsta/lägsta är högst/lägst inom ±N dagar (*Känslighet*).
@@ -15,11 +15,9 @@ Signalerna utvärderas på dagens stängning mot nivåerna som fanns dagen innan
 |---|---|---|
 | Long | Utbrott | Stänger över ett motstånd med minst ¼ ATR marginal |
 | Long | Studs på stöd | Dagens lägsta når stödzonen, stänger över stödet, grön dag |
-| Short | Nedbrott | Stänger under ett stöd med minst ¼ ATR marginal |
-| Short | Avvisad vid motstånd | Dagens högsta når motståndszonen, stänger under motståndet, röd dag |
 
 - **Stopp** läggs på andra sidan nivån (± zonbredd), **mål** är nästa nivå (annars 2 × risken).
-- **Trendfilter** (valbart): long bara över SMA 50, short bara under.
+- **Trendfilter** (valbart): signaler bara när kursen ligger över SMA 50.
 - **Minsta risk/belöning** filtrerar bort signaler med för litet mål i förhållande till stoppet.
 - Varje historisk signal följs upp (mål nått, stoppad eller aktiv) och sidan visar träffsäkerhet och snitt-R för perioden.
 - **Signalöversikten** skannar alla aktier i listan efter färska signaler.

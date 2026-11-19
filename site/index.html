@@ -38,7 +38,6 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .card .value{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
 .card .sub{font-size:13px;color:var(--muted)}
 .card.signal-long{border-color:var(--sup);background:var(--sup-bg)}
-.card.signal-short{border-color:var(--res);background:var(--res-bg)}
 .sup{color:var(--sup)} .res{color:var(--res)}
 .layout{display:grid;grid-template-columns:1fr 280px;gap:14px}
 @media (max-width:900px){.layout{grid-template-columns:1fr}}
@@ -128,8 +127,8 @@ footer{max-width:1200px;margin:0 auto;padding:4px 16px 30px;font-size:12px;color
           <label class="check"><input type="checkbox" id="markers"> Markera svängpunkter</label>
 
           <h3>Signaler</h3>
-          <label class="check"><input type="checkbox" id="showSig" checked> Visa long/short i grafen</label>
-          <label class="check"><input type="checkbox" id="trend" checked> Bara med trenden (SMA 50)</label>
+          <label class="check"><input type="checkbox" id="showSig" checked> Visa long-signaler i grafen</label>
+          <label class="check"><input type="checkbox" id="trend" checked> Bara när kursen är över SMA 50</label>
           <label for="minRR"><span class="row"><span>Minsta risk/belöning</span><b id="minRRV"></b></span></label>
           <input id="minRR" type="range" min="0" max="3" step="0.25" value="1">
         </div>
@@ -170,11 +169,6 @@ footer{max-width:1200px;margin:0 auto;padding:4px 16px 30px;font-size:12px;color
           <option value="5" selected>Senaste 5 dagarna</option>
           <option value="10">Senaste 10 dagarna</option>
           <option value="21">Senaste månaden</option>
-        </select>
-        <select id="scanSide">
-          <option value="all">Long och short</option>
-          <option value="long">Bara long</option>
-          <option value="short">Bara short</option>
         </select>
         <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="scanActive" checked> Bara aktiva</label>
       </div>
@@ -275,10 +269,8 @@ function levelsAt(ctx, t, o){
 }
 
 /* Signalregler (utvärderas på dagens stängning mot gårdagens nivåer):
-   Long  – Utbrott: stängning över ett motstånd med minst ¼ ATR marginal.
-         – Studs:   dagens lägsta når stödzonen, stängning över stödet och grön dag.
-   Short – Nedbrott: stängning under ett stöd med minst ¼ ATR marginal.
-         – Avvisning: dagens högsta når motståndszonen, stängning under motståndet och röd dag.
+   Long – Utbrott: stängning över ett motstånd med minst ¼ ATR marginal.
+       – Studs:   dagens lägsta når stödzonen, stängning över stödet och grön dag.
    Stopp läggs på andra sidan nivån (± zonbredd), målet är nästa nivå (annars 2R). */
 function signalAt(ctx, t, o){
   if (t < 60) return null;
@@ -288,23 +280,16 @@ function signalAt(ctx, t, o){
   const [date, O, H, Lo, C] = all[t], P = all[t-1][4], a = LV.a, tol = LV.tol;
   const lv = LV.levels.map(l => l.price).sort((x,y)=>x-y);
   const upBreaks = lv.filter(x => P <= x && C > x + 0.25 * a);
-  const dnBreaks = lv.filter(x => P >= x && C < x - 0.25 * a);
-  const below = lv.filter(x => x < C), above = lv.filter(x => x > C);
+  const below = lv.filter(x => x < C);
   let s = null;
   if (upBreaks.length){ const x = Math.max(...upBreaks); s = {side:"long", kind:"Utbrott", level:x, stop:x - tol}; }
-  else if (dnBreaks.length){ const x = Math.min(...dnBreaks); s = {side:"short", kind:"Nedbrott", level:x, stop:x + tol}; }
   else {
-    const sp = below.length ? below[below.length-1] : null, rs = above.length ? above[0] : null;
+    const sp = below.length ? below[below.length-1] : null;
     if (sp != null && Lo <= sp + tol && C > O && C - sp <= a) s = {side:"long", kind:"Studs på stöd", level:sp, stop:sp - tol};
-    else if (rs != null && H >= rs - tol && C < O && rs - C <= a) s = {side:"short", kind:"Avvisad vid motstånd", level:rs, stop:rs + tol};
   }
   if (!s) return null;
-  if (o.trend && isFinite(sma[t]) && ((s.side === "long" && C < sma[t]) || (s.side === "short" && C > sma[t]))) return null;
-  if (s.side === "long"){
-    const tg = lv.find(x => x > C + 0.5 * a); s.target = tg ?? C + 2 * (C - s.stop);
-  } else {
-    const tg = [...lv].reverse().find(x => x < C - 0.5 * a); s.target = tg ?? C - 2 * (s.stop - C);
-  }
+  if (o.trend && isFinite(sma[t]) && C < sma[t]) return null;
+  const tg = lv.find(x => x > C + 0.5 * a); s.target = tg ?? C + 2 * (C - s.stop);
   const risk = Math.abs(C - s.stop);
   if (risk <= 0) return null;
   s.rr = Math.abs(s.target - C) / risk;
@@ -328,7 +313,7 @@ function outcome(all, s){
 }
 
 function signalsInRange(ctx, from, to, o){
-  const out = []; const lastT = {long:-1e9, short:-1e9};
+  const out = []; const lastT = {long:-1e9};
   for (let t = Math.max(from, 60); t <= to; t++){
     const s = signalAt(ctx, t, o);
     if (!s || t - lastT[s.side] < ctx.k) continue; // undvik upprepningar
@@ -390,7 +375,7 @@ function setLabels(){
   $("minRRV").textContent = (+$("minRR").value).toFixed(2).replace(".", ",");
 }
 
-const sigTag = s => s.side === "long" ? `<span class="tag sup">Long</span>` : `<span class="tag res">Short</span>`;
+const sigTag = () => `<span class="tag sup">Long</span>`;
 const outText = o => o.res === "win" ? `<span class="sup">Mål nått ${o.date}</span>` : o.res === "loss" ? `<span class="res">Stoppad ${o.date}</span>` : `<span class="muted">Aktiv</span>`;
 
 function render(){
@@ -432,7 +417,7 @@ function render(){
   const card = $("cSigCard");
   card.className = "card" + (active ? " signal-" + active.side : "");
   if (active){
-    $("cSig").innerHTML = active.side === "long" ? `<span class="sup">LONG</span>` : `<span class="res">SHORT</span>`;
+    $("cSig").innerHTML = `<span class="sup">LONG</span>`;
     $("cSigSub").textContent = `${active.kind} ${active.date} · stopp ${fmt(active.stop)} · mål ${fmt(active.target)} · R/R ${num1(active.rr)}`;
   } else {
     $("cSig").innerHTML = `<span class="muted">Neutral</span>`;
@@ -470,7 +455,7 @@ function render(){
   const wins = closed.filter(s => s.out.res === "win").length;
   const avgR = closed.length ? closed.reduce((a,s)=>a+s.out.r,0)/closed.length : 0;
   $("sigStats").innerHTML = sigs.length
-    ? `<span>Signaler: <b>${sigs.length}</b> (${sigs.filter(s=>s.side==="long").length} long, ${sigs.filter(s=>s.side==="short").length} short)</span>
+    ? `<span>Signaler: <b>${sigs.length}</b></span>
        <span>Avslutade: <b>${closed.length}</b></span>
        <span>Träffsäkerhet: <b>${closed.length ? Math.round(100*wins/closed.length) + " %" : "–"}</b></span>
        <span>Snitt per affär: <b class="${avgR>=0?"sup":"res"}">${closed.length ? (avgR>=0?"+":"") + num1(avgR) + " R" : "–"}</b></span>`
@@ -550,13 +535,12 @@ async function loadIndex(){
 let scanToken = 0;
 async function runScan(){
   const token = ++scanToken;
-  const o = opts(), days = +$("scanDays").value, side = $("scanSide").value, onlyActive = $("scanActive").checked;
+  const o = opts(), days = +$("scanDays").value, onlyActive = $("scanActive").checked;
   if (!state.index.length){ $("scanStatus").textContent = "Ingen kursdata finns än."; $("scanRows").innerHTML = ""; return; }
   const results = []; let done = 0;
   const queue = [...state.index];
   const draw = () => {
     const rows = results
-      .filter(r => side === "all" || r.s.side === side)
       .filter(r => !onlyActive || r.s.out.res === "open")
       .sort((x,y) => x.s.date === y.s.date ? y.s.rr - x.s.rr : (x.s.date < y.s.date ? 1 : -1));
     $("scanRows").innerHTML = rows.length ? rows.map(r => `<tr class="click" data-sym="${esc(r.item.symbol)}">
@@ -590,7 +574,7 @@ async function runScan(){
   if (token === scanToken) draw();
 }
 $("scanRows").addEventListener("click", e => { const tr = e.target.closest("tr[data-sym]"); if (tr) loadSymbol(tr.dataset.sym); });
-["scanDays","scanSide","scanActive"].forEach(id => $(id).addEventListener("change", runScan));
+["scanDays","scanActive"].forEach(id => $(id).addEventListener("change", runScan));
 
 function setView(v){
   $("viewChart").hidden = v !== "chart"; $("viewScan").hidden = v !== "scan";
