@@ -1,6 +1,6 @@
 # Stöd & Motstånd
 
-En hemsida som visar stöd- och motståndsnivåer för amerikanska aktier, med candlestick-graf, nivåtabell, klassiska pivotpunkter och long-signaler.
+En hemsida som visar stöd- och motståndsnivåer för alla aktier i S&P 500, med candlestick-graf, nivåtabell, klassiska pivotpunkter och long-signaler.
 
 ## Så räknas nivåerna
 1. **Svängpunkter**: en dag räknas som svängtopp/-botten om dess högsta/lägsta är högst/lägst inom ±N dagar (*Känslighet*).
@@ -48,8 +48,9 @@ Signalerna utvärderas på dagens stängning mot nivåerna som fanns dagen innan
 Allt räknas i webbläsaren, så reglagen uppdaterar direkt.
 
 ## Data
-- `watchlist.txt` listar aktierna (Yahoo Finance-symboler, just nu drygt 120 amerikanska aktier). Lägg till eller ta bort rader där.
-- GitHub Actions (`.github/workflows/pages.yml`) hämtar 5 års dagsdata med `yfinance` varje vardagskväll och publicerar sidan på GitHub Pages.
+- **Alla aktier i S&P 500** hämtas automatiskt. Listan över bolag hämtas från [datasets/s-and-p-500-companies](https://github.com/datasets/s-and-p-500-companies) vid varje körning, så ändringar i indexet följer med. `sp500.csv` är en reservkopia.
+- `watchlist.txt` är för **extra** aktier utanför S&P 500.
+- GitHub Actions (`.github/workflows/pages.yml`) hämtar 5 års dagsdata med `yfinance` varje vardagskväll, räknar fram signalöversikten i förväg (`scripts/scan.js`) och publicerar sidan på GitHub Pages.
 - Du kan också ladda upp en egen CSV (kolumner: Datum, Öppning, Högst, Lägst, Stängning, Volym; engelska namn fungerar också).
 
 ## Kom igång

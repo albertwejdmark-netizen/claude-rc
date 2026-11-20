@@ -20,6 +20,7 @@ concurrency:
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -30,6 +31,10 @@ jobs:
           python-version: "3.12"
       - run: pip install yfinance
       - run: python scripts/fetch_data.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node scripts/scan.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
