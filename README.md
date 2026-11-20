@@ -22,13 +22,13 @@ Handelsplanen visar köp, stoploss och TP1–TP3 med avstånd i % och R-multipel
 - Varje historisk signal följs upp: vilka TP som nåddes innan stoploss.
 
 ## Strategier (från backtest)
-`scripts/backtest.js` testar tusentals kombinationer av filter på alla aktier. Inställningarna väljs på data före 2025 och kontrolleras på data från 2025. Arbetsflödet *Backtest av signalerna* kör det i GitHub Actions.
+`scripts/backtest.js` testar tusentals kombinationer av filter på alla aktier. Strategierna valdes på 122 aktier med data före 2025; siffrorna nedan är kontrollen på alla ~506 aktier i S&P 500 med data från 2025. Arbetsflödet *Backtest av signalerna* kör det i GitHub Actions.
 
 | Strategi | Regler | Vinst (TP1 före SL), kontroll | Snitt per affär |
 |---|---|---|---|
-| **Utbrott med volym** (standard) | Utbrott, volym ≥ 1,8 × snitt, stängning i översta fjärdedelen av dagen, nivå respekterad ≥ 60 %, SL 3 × ATR, TP 1R/2R/3R | 55 % | +0,15 R |
-| Studs på stöd | Studs, kurs över SMA 50, stängning i övre halvan, nivå respekterad ≥ 60 %, RSI ≤ 70, SL 3 × ATR, TP nästa motstånd | 61 % | +0,06 R |
-| Ursprungliga reglerna | Utbrott + studs, kurs över SMA 50, SL under stödzonen, TP nästa motstånd, R/R ≥ 1 | 38 % | +0,08 R |
+| **Utbrott med volym** (standard) | Utbrott, volym ≥ 1,8 × snitt, stängning i översta fjärdedelen av dagen, nivå respekterad ≥ 60 %, SL 3 × ATR, TP 1R/2R/3R | 52 % | +0,10 R |
+| Studs på stöd | Studs, kurs över SMA 50, stängning i övre halvan, nivå respekterad ≥ 60 %, RSI ≤ 70, SL 3 × ATR, TP nästa motstånd | 61 % | +0,04 R |
+| Ursprungliga reglerna | Utbrott + studs, kurs över SMA 50, SL under stödzonen, TP nästa motstånd, R/R ≥ 1 | 37 % | +0,04 R |
 
 Historiskt resultat är ingen garanti. Courtage och slippage är inte medräknat.
 
