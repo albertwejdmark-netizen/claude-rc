@@ -66,3 +66,45 @@ cd site && python -m http.server 8000   # öppna http://localhost:8000
 ```
 
 *Endast i informationssyfte, inte investeringsrådgivning.*
+
+---
+
+# Matchlabbet (fotboll)
+
+`site/fotboll/` är en hemsida som analyserar alla matcher i 32 europeiska fotbollsligor: chanser och rättvisa odds för alla vanliga spel, lag- och domarstatistik, spelförslag och en lappbyggare. Den publiceras på samma GitHub Pages-sida under `/fotboll/` (länk finns uppe till höger på aktiesidan).
+
+## Vyer
+| Vy | Innehåll |
+|---|---|
+| **Matcher** | Kommande matcher per dag och liga: chans till 1/X/2, odds, över 2,5 och båda lagen gör mål. Grönt odds = spelvärde. |
+| **Matchsida** | Alla spel (1X2, dubbelchans, mållinjer, båda gör mål, lagmål, första halvlek, hörnor, kort, asiatiskt handikapp) med chans, rättvist odds, odds och värde. Lagjämförelse hemma/borta, form, inbördes möten och domare. |
+| **Spelförslag** | Alla spel på alla kommande matcher, filtrerbart på marknad, chans, odds, värde, dag och liga. Snabbval: värdespel, säkra spel, mål, båda gör mål, hörnor, kort. |
+| **Lappar** | Bygg en lapp, skriv in ditt spelbolags odds och se totalodds, verklig chans och förväntat värde. Lappgeneratorn föreslår tre lappar efter strategi. Sparade lappar rättas automatiskt. |
+| **Lag** | Sorterbar tabell över alla lag (översikt, mål, hörnor och kort, resultat om man spelat varje match) med uppdelning alla/hemma/borta/senaste 6. Lagsidor med all statistik, sviter och matchlista. |
+| **Domare** | Kort per match, kortfaktor mot ligasnittet, över 3,5/4,5 kort, fouls, mål och hemmavinster, plus kommande uppdrag. |
+| **Ligor** | Tabell, ligasnitt och topplistor. |
+| **Modell** | Hur chanserna räknas och hur de har träffat i backtestet. |
+
+## Så räknas chanserna
+1. **Statistikmodell (Dixon–Coles):** anfalls- och försvarsstyrka per lag från mål blandat med xG (eller skott på mål där xG saknas), två säsonger bakåt med halveringstid 180 dagar. Nyuppflyttade lag startar svagare, nedflyttade starkare.
+2. **Marknaden:** snittoddsen för 1X2 och över/under 2,5 räknas om till förväntade mål utan spelbolagens marginal.
+3. **Kombination:** vikten mellan modell och marknad väljs i backtestet på förra säsongen och kontrolleras på den nuvarande. Hittills har oddsen träffat bättre än statistikmodellen ensam (log-loss 1,005 mot 1,025), så vikten för modellen är 0 och chanserna för mål och resultat bygger på marknaden. Modellens egen bedömning visas ändå på matchsidan.
+4. **Hörnor och kort:** lagens snitt för och emot i förhållande till ligasnittet, negativ binomialfördelning. Korten justeras med domarens kortfaktor.
+
+**Värde** = chans × odds − 1. Spel som saknar odds i datan (t.ex. båda gör mål, hörnor, kort) visar ett uppskattat odds med ≈; jämför rättvist odds med ditt spelbolag.
+
+Backtestet (`scripts/fotboll/build.py`) skattar om modellen varje vecka på matcherna före och tippar veckans matcher. Spel med minst 3 % värde mot bästa odds och odds upp till 5 gav +7 % förra säsongen (707 spel) och +9 % hittills i år (169 spel). Utan oddstak blev det förlust. Säkra spel (chans ≥ 70 %) gick in lika ofta som bedömt men gav −2 % till snittodds. Inget av detta är en garanti.
+
+## Data
+- [football-data.co.uk](https://www.football-data.co.uk): resultat, halvtid, skott, hörnor, kort, fouls, xG, domare (England och Skottland) och odds för 22 huvudligor (tre säsonger), resultat och stängningsodds för 10 extra ligor, samt kommande matcher med odds.
+- GitHub Actions bygger datan varje morgon och tisdag/fredag eftermiddag (nya odds) i samma arbetsflöde som aktiesidan.
+
+Lokalt:
+```bash
+pip install numpy
+python scripts/fotboll/build.py          # hämtar data och bygger site/fotboll/data/
+python scripts/fotboll/build.py --tune   # jämför modellinställningar i backtestet
+cd site && python -m http.server 8000    # öppna http://localhost:8000/fotboll/
+```
+
+*Statistik och sannolikheter, inga garantier. Spela bara för pengar du har råd att förlora. 18 år. Stöd: [stodlinjen.se](https://www.stodlinjen.se), 020-81 91 00.*

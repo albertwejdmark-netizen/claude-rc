@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Matchlabbet</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Analys av alla matcher i 32 europeiska fotbollsligor: sannolikheter, odds, lag, domare och spelförslag.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <a class="brand" href="#matcher">Match<span>labbet</span></a>
+    <nav class="nav" id="nav" aria-label="Huvudmeny">
+      <a href="#matcher" data-view="matcher">Matcher</a>
+      <a href="#spel" data-view="spel">Spelförslag</a>
+      <a href="#lappar" data-view="lappar">Lappar<span class="badge" id="slipCount" hidden></span></a>
+      <a href="#lag" data-view="lag">Lag</a>
+      <a href="#domare" data-view="domare">Domare</a>
+      <a href="#ligor" data-view="ligor">Ligor</a>
+      <a href="#modell" data-view="modell">Modell</a>
+    </nav>
+    <label class="oddssrc" for="oddsSrc">Odds
+      <select id="oddsSrc">
+        <option value="avg">Snitt</option>
+        <option value="max">Bästa</option>
+        <option value="b365">Bet365</option>
+      </select>
+    </label>
+  </div>
+</header>
+<main id="app"><p class="loading">Laddar matcher …</p></main>
+<footer id="foot"></footer>
+<div class="tip" id="tip" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
