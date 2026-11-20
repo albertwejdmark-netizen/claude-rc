@@ -309,7 +309,7 @@ function mrow(f) {
     <span class="time ${live ? 'live' : ''}">${live ? 'Pågår' : hm(f.ko)}</span>
     <span class="teams"><span class="tm">${esc(f.home)}${ht?.pos ? `<small title="Tabellplats">${ht.pos}</small>` : ''}</span><span class="tm">${esc(f.away)}${at?.pos ? `<small title="Tabellplats">${at.pos}</small>` : ''}</span></span>
     ${bar(f.p['1'], f.p['X'], f.p['2'])}
-    <span class="odds3">${o}</span>
+    <span class="odds3" ${f.oddsProvider ? `title="Odds från ${esc(f.oddsProvider)}"` : ''}>${o}</span>
     <span class="kv"><span>Ö2,5 <b>${pct(f.p['O2.5'])}</b></span><span>BLGM <b>${pct(f.p['BTTS:J'])}</b></span></span>
     <span class="flag">${bv && bv.e > 0.02 ? `<span class="pill value" title="${esc(label(bv.key, f))}">${sgn(bv.e, 0)} värde</span>` : ''}</span>
   </a>`;
@@ -321,7 +321,7 @@ function fixtureGroups(list, { byDay = true } = {}) {
   for (const f of list) (days[byDay ? dayKey(f.ko) : 'x'] ||= []).push(f);
   let h = '';
   for (const [d, fs] of Object.entries(days).sort()) {
-    h += `<div class="daygroup">${byDay ? `<h2 class="daytitle">${dayName(d)}</h2>` : ''}`;
+    h += `<div class="daygroup">${byDay ? `<h2 class="daytitle">${cap(dayName(d))}</h2>` : ''}`;
     const lgs = {};
     for (const f of fs) (lgs[f.lg] ||= []).push(f);
     for (const lg of Object.keys(lgs).sort((a, b) => ord.indexOf(a) - ord.indexOf(b))) {
@@ -343,7 +343,7 @@ function viewMatcher() {
   const nv = S.fx.filter(f => (bestValue(f)?.e ?? -1) > 0.02).length;
   return `<div class="stack">
     <div class="section-head"><div><h1>Kommande matcher</h1>
-      <p class="lead">${S.fx.length} matcher i ${nl} ligor. Staplarna visar chansen till 1, X och 2, oddsen är ${SRC_NAME[S.set.odds]}. Grönt odds betyder att oddset är högre än vår bedömning, alltså spelvärde.</p></div></div>
+      <p class="lead">${S.fx.length} matcher i ${nl} ligor och cuper. Staplarna visar chansen till 1, X och 2, oddsen är ${SRC_NAME[S.set.odds]} (för Europacuperna och matcher längre fram: DraftKings). Grönt odds betyder att oddset är högre än vår bedömning, alltså spelvärde.</p></div></div>
     <div class="controls">
       <div class="chips" role="group" aria-label="Dag">
         <button class="chip ${u.day === 'all' ? 'on' : ''}" data-k="day" data-v="all">Alla dagar</button>
@@ -372,6 +372,7 @@ const CMP = [
   ['cs', 'Hållit nollan', pct, 1],
   ['fts', 'Inte gjort mål', pct, -1],
   ['fh05', 'Mål i första halvlek', pct, 0],
+  ['poss', 'Bollinnehav', x => x == null ? '–' : dec(x, 0) + '\u00a0%', 0],
   ['stf', 'Skott på mål', x => dec(x, 1), 1],
   ['sta', 'Skott på mål emot', x => dec(x, 1), -1],
   ['cf', 'Hörnor för', x => dec(x, 1), 1],
@@ -416,7 +417,7 @@ function viewMatch(id) {
   const ref = f.refId && S.refs[f.refId];
   const mm = f.lamM ? dc(f.lamM[0], f.lamM[1]) : null;
   const mk = f.lamK ? dc(f.lamK[0], f.lamK[1]) : null;
-  const side = (t, name, id) => `<div class="side"><h1>${teamLink(id, name)}</h1><div class="small muted">${t?.pos ? `Plats ${t.pos} av ${t.of}` : ''}${t?.rating ? ` · styrka ${t.rating.rank} av ${t.rating.of}` : ''}</div><div style="margin-top:6px">${t ? formChips(t.form.map(x => x[6]).join('')) : ''}</div></div>`;
+  const side = (t, name, id) => `<div class="side"><h1>${teamLink(id, name)}</h1><div class="small muted">${t?.pos ? `Plats ${t.pos} av ${t.of}${t.lg !== f.lg ? ' i ' + esc(lgShort(t.lg)) : ''}` : ''}${t?.rating && t.lg === f.lg ? ` · styrka ${t.rating.rank} av ${t.rating.of}` : ''}</div><div style="margin-top:6px">${t ? formChips(t.form.map(x => x[6]).join('')) : ''}</div></div>`;
   const cs = f.cs.slice(0, 3).map(([s, p]) => `${s.replace('-', '–')} <span class="faint">${pct(p)}</span>`).join(' · ');
   setTimeout(() => fillH2H(f), 0);
   return `<div class="stack">
@@ -424,7 +425,7 @@ function viewMatch(id) {
       <div class="row between"><span class="eyebrow"><a href="#liga-${f.lg}">${esc(lgName(f.lg))}</a></span><span class="small muted">${cap(longDateTime(f.ko))}</span></div>
       <div class="matchhead">${side(ht, f.home, f.hid)}<div><div class="xg">${dec(f.lam[0], 1)} – ${dec(f.lam[1], 1)}</div><div class="small muted">förväntade mål</div></div>${side(at, f.away, f.aid)}</div>
       ${bar(f.p['1'], f.p['X'], f.p['2'])}
-      <div class="row between">${legend1x2()}<span class="small muted">Domare: ${ref ? `<a href="#domare-${esc(f.refId)}">${esc(f.ref)}</a>` : (f.ref ? esc(f.ref) : 'ej tillsatt i datan')}</span></div>
+      <div class="row between">${legend1x2()}<span class="small muted">${f.neutral ? 'Neutral plan · ' : ''}Domare: ${ref ? `<a href="#domare-${esc(f.refId)}">${esc(f.ref)}</a>` : (f.ref ? esc(f.ref) : 'ej angiven i datan')}</span></div>
     </div>
     <div class="tiles">
       ${tile('Troligaste resultat', esc(f.cs[0][0].replace('-', '–')), cs)}
@@ -434,7 +435,7 @@ function viewMatch(id) {
       ${f.cards ? tile('Kort, förväntat', dec(f.cards.h + f.cards.a, 1), f.ref && f.cards.rn ? `domarfaktor ${dec(f.cards.rf)}` : 'utan domarjustering') : ''}
     </div>
     <div class="matchgrid">
-      <div class="panel" style="min-width:0"><h2>Alla spel</h2><p class="note" style="margin:-4px 0 10px">Chansen bygger på marknadens odds och lagens statistik. Rättvist odds = 1 / chans. Värde = chans × odds − 1 (${SRC_NAME[S.set.odds]}). Spel utan odds i datan visar ett uppskattat odds med ≈, jämför med ditt spelbolag.</p>${marketsTable(f)}</div>
+      <div class="panel" style="min-width:0"><h2>Alla spel</h2>${oddsNotice(f)}<p class="note" style="margin:-4px 0 10px">Chansen bygger på marknadens odds och lagens statistik. Rättvist odds = 1 / chans. Värde = chans × odds − 1 (${SRC_NAME[S.set.odds]}). Spel utan odds i datan visar ett uppskattat odds med ≈, jämför med ditt spelbolag.</p>${marketsTable(f)}</div>
       <div class="stack" style="min-width:0">
         <div class="panel"><h2>Lagen jämförda</h2>${compareTable(f)}</div>
         ${mm ? `<div class="panel"><h3>Statistikmodellen mot marknaden</h3>
@@ -450,6 +451,12 @@ function viewMatch(id) {
     </div>
     <div class="panel"><h3>Inbördes möten</h3><div id="h2h" class="muted">Laddar …</div></div>
   </div>`;
+}
+
+function oddsNotice(f) {
+  if (!f.odds || !f.odds['1']) return '<p><span class="pill warn">Inga odds än</span> <span class="note">Chanserna bygger bara på statistikmodellen, som träffar sämre än oddsen. Oddsen brukar komma några dagar före matchen.</span></p>';
+  if (f.oddsProvider) return `<p><span class="pill info">Odds från ${esc(f.oddsProvider)}</span> <span class="note">Bara ett spelbolag, så snitt och bästa odds finns inte för den här matchen.</span></p>`;
+  return '';
 }
 
 function formTable(t) {
@@ -468,14 +475,15 @@ function refMini(ref, f) {
 }
 
 async function fillH2H(f) {
-  const rows = await leagueFile(f.lg);
+  const lgs = [...new Set([f.lg, S.teams[f.hid]?.lg, S.teams[f.aid]?.lg].filter(Boolean))];
+  const rows = (await Promise.all(lgs.map(leagueFile))).flat().sort((a, b) => b.date.localeCompare(a.date));
   const el = $('#h2h');
   if (!el || location.hash.slice(1) !== 'match-' + f.id) return;
   const h2h = rows.filter(m => (m.hid === f.hid && m.aid === f.aid) || (m.hid === f.aid && m.aid === f.hid));
   if (!h2h.length) { el.textContent = 'Lagen har inte mötts i ligan de senaste säsongerna.'; return; }
   el.classList.remove('muted');
-  el.innerHTML = `<div class="tablewrap"><table><thead><tr><th>Datum</th><th>Match</th><th class="num">Resultat</th><th class="num">Halvtid</th><th class="num">Hörnor</th><th class="num">Kort</th></tr></thead><tbody>${h2h.map(m =>
-    `<tr><td>${shortDate(m.date)} ${m.date.slice(0, 4)}</td><td>${esc(m.home)} – ${esc(m.away)}</td><td class="num"><b>${m.hg}–${m.ag}</b></td><td class="num">${m.hthg != null ? `${m.hthg}–${m.htag}` : '–'}</td><td class="num">${m.hc != null ? m.hc + m.ac : '–'}</td><td class="num">${m.hy != null ? m.hy + m.ay + (m.hr || 0) + (m.ar || 0) : '–'}</td></tr>`).join('')}</tbody></table></div>`;
+  el.innerHTML = `<div class="tablewrap"><table><thead><tr><th>Datum</th><th>Tävling</th><th>Match</th><th class="num">Resultat</th><th class="num">Halvtid</th><th class="num">Hörnor</th><th class="num">Kort</th></tr></thead><tbody>${h2h.map(m =>
+    `<tr><td>${shortDate(m.date)} ${m.date.slice(0, 4)}</td><td class="small muted">${esc(lgShort(m.lg))}</td><td>${esc(m.home)} – ${esc(m.away)}</td><td class="num"><b>${m.hg}–${m.ag}</b></td><td class="num">${m.hthg != null ? `${m.hthg}–${m.htag}` : '–'}</td><td class="num">${m.hc != null ? m.hc + m.ac : '–'}</td><td class="num">${m.hy != null ? m.hy + m.ay + (m.hr || 0) + (m.ar || 0) : '–'}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 // ------------------------------------------------------------------ vy: spelförslag
@@ -681,6 +689,7 @@ async function settleSaved() {
 const TEAM_SETS = {
   oversikt: { label: 'Översikt', cols: [['n', 'M'], ['ppg', 'Poäng/m'], ['gf', 'Gjorda/m'], ['ga', 'Insl./m'], ['xgf', 'xG för'], ['xga', 'xG emot'], ['form', 'Form'], ['rank', 'Styrka']] },
   mal: { label: 'Mål', cols: [['n', 'M'], ['gpm', 'Mål/m'], ['o15', 'Ö1,5'], ['o25', 'Ö2,5'], ['o35', 'Ö3,5'], ['btts', 'BLGM'], ['cs', 'Nolla'], ['fts', 'Ej mål'], ['fh05', 'Mål 1:a halvl.']] },
+  spelstil: { label: 'Skott och bollinnehav', cols: [['n', 'M'], ['poss', 'Bollinnehav'], ['sf', 'Skott'], ['sa', 'Skott emot'], ['stf', 'På mål'], ['sta', 'På mål emot'], ['ff', 'Fouls'], ['fa', 'Fouls mot']] },
   hornkort: { label: 'Hörnor och kort', cols: [['n', 'M'], ['cf', 'Hörnor för'], ['ca', 'Hörnor emot'], ['ct', 'Hörnor tot.'], ['c95', 'Ö9,5 hörnor'], ['kf', 'Kort'], ['ka', 'Kort motst.'], ['kt', 'Kort tot.'], ['k45', 'Ö4,5 kort']] },
   spel: { label: 'Om du spelat varje match', cols: [['n', 'M'], ['roiW', 'Vinst'], ['roiD', 'Oavgjort'], ['roiL', 'Förlust'], ['roiO', 'Ö2,5'], ['roiU', 'U2,5']] },
 };
@@ -689,6 +698,7 @@ function statFmt(k, v) {
   if (v == null) return '–';
   if (k.startsWith('roi')) return `<span class="${v > 0 ? 'good' : 'bad'}">${sgn(v, 0)}</span>`;
   if (PCT_KEYS.has(k)) return pct(v);
+  if (k === 'poss') return dec(v, 1) + '\u00a0%';
   if (k === 'n') return v;
   return dec(v, k === 'ppg' ? 2 : (['sf', 'sa', 'stf', 'sta', 'ff', 'fa', 'cf', 'ca', 'ct', 'kf', 'ka', 'kt'].includes(k) ? 1 : 2));
 }
@@ -702,13 +712,13 @@ function teamVal(t, split, k) {
 
 function viewLag() {
   const u = S.ui.lag, set = TEAM_SETS[u.set];
-  let list = Object.values(S.teams).filter(t => u.lg === 'all' || t.lg === u.lg);
+  let list = Object.values(S.teams).filter(t => u.lg === 'all' || t.lg === u.lg || (t.comps || []).includes(u.lg));
   if (u.q) { const q = u.q.toLowerCase(); list = list.filter(t => t.name.toLowerCase().includes(q)); }
   if (!set.cols.some(c => c[0] === u.sort) && u.sort !== 'name') { u.sort = set.cols[1][0]; u.asc = false; }
   list = sortRows(list, u.sort, u.asc, u.sort === 'name' ? t => t.name : t => teamVal(t, u.split, u.sort));
   const splits = [['all', 'Alla'], ['home', 'Hemma'], ['away', 'Borta'], ['last6', 'Senaste 6']];
   return `<div class="stack">
-    <div><h1>Lag</h1><p class="lead">${Object.keys(S.teams).length} lag, statistik från innevarande säsong. Klicka på en kolumn för att sortera, eller på ett lag för allt om laget.</p></div>
+    <div><h1>Lag</h1><p class="lead">${Object.keys(S.teams).length} lag, statistik från innevarande säsong i lagets liga (för lag som bara finns i Europacuperna: cupmatcherna). Klicka på en kolumn för att sortera, eller på ett lag för allt om laget.</p></div>
     <div class="chips">${Object.entries(TEAM_SETS).map(([k, s]) => `<button class="chip ${u.set === k ? 'on' : ''}" data-k="lag.set" data-v="${k}">${s.label}</button>`).join('')}</div>
     <div class="controls">
       <label class="field" for="tLg">Liga ${leagueSelect('tLg', 'lag.lg', u.lg)}</label>
@@ -729,7 +739,7 @@ const TEAM_ROWS = [
   ['ppg', 'Poäng per match'], ['gf', 'Gjorda mål per match'], ['ga', 'Insläppta mål per match'], ['xgf', 'xG för'], ['xga', 'xG emot'],
   ['o15', 'Över 1,5 mål'], ['o25', 'Över 2,5 mål'], ['o35', 'Över 3,5 mål'], ['btts', 'Båda lagen gör mål'], ['cs', 'Hållit nollan'], ['fts', 'Inte gjort mål'],
   ['fh05', 'Mål i första halvlek'], ['htw', 'Ledning i halvtid'],
-  ['sf', 'Skott'], ['sa', 'Skott emot'], ['stf', 'Skott på mål'], ['sta', 'Skott på mål emot'],
+  ['poss', 'Bollinnehav'], ['sf', 'Skott'], ['sa', 'Skott emot'], ['stf', 'Skott på mål'], ['sta', 'Skott på mål emot'],
   ['cf', 'Hörnor för'], ['ca', 'Hörnor emot'], ['ct', 'Hörnor totalt'], ['c95', 'Över 9,5 hörnor'],
   ['kf', 'Kort, eget lag'], ['ka', 'Kort, motståndare'], ['kt', 'Kort totalt'], ['k45', 'Över 4,5 kort'], ['ff', 'Fouls'],
   ['roiW', 'Spel på vinst varje match'], ['roiO', 'Spel på över 2,5 varje match'], ['roiU', 'Spel på under 2,5 varje match'],
@@ -745,12 +755,12 @@ function viewTeam(id) {
   const rows = TEAM_ROWS.filter(([k]) => ['all', 'home', 'away', 'last6'].some(s => t[s]?.[k] != null));
   return `<div class="stack">
     <div class="panel stack">
-      <span class="eyebrow"><a href="#liga-${t.lg}">${esc(lgName(t.lg))}</a></span>
+      <span class="eyebrow">${(t.comps || [t.lg]).map(c => `<a href="#liga-${c}">${esc(c === t.lg ? lgName(c) : lgShort(c))}</a>`).join(' · ')}</span>
       <div class="row between"><h1>${esc(t.name)}</h1><span>${formChips(t.form.map(x => x[6]).join(''))}</span></div>
       <div class="small muted">${t.pos ? `Plats ${t.pos} av ${t.of} med ${a.pts} poäng på ${a.n} matcher.` : ''} ${t.rating ? `Styrka ${t.rating.rank} av ${t.rating.of} enligt modellen: gör ${dec(t.rating.att)} och släpper in ${dec(t.rating.def)} mål mot ett snittlag.` : ''}</div>
       ${streaks.length ? `<div class="chips">${streaks.map(([k, n]) => `<span class="pill info">${n} matcher ${STREAKS[k] || k}</span>`).join('')}</div>` : ''}
     </div>
-    ${next.length ? `<div><h2 style="margin-bottom:8px">Nästa match</h2><div class="lggroup">${next.map(mrow).join('')}</div></div>` : ''}
+    ${next.length ? `<div><h2 style="margin-bottom:8px">Kommande matcher</h2>${fixtureGroups(next)}</div>` : ''}
     <div class="tiles">
       ${tile('Poäng per match', dec(a.ppg), `${a.w}–${a.d}–${a.l}`)}
       ${tile('Mål', `${a.gfT}–${a.gaT}`, `${dec(a.gf, 1)} – ${dec(a.ga, 1)} per match`)}
@@ -759,6 +769,7 @@ function viewTeam(id) {
       ${tile('Båda lagen gör mål', pct(a.btts))}
       ${a.ct != null ? tile('Hörnor per match', dec(a.ct, 1), `${dec(a.cf, 1)} för, ${dec(a.ca, 1)} emot`) : ''}
       ${a.kt != null ? tile('Kort per match', dec(a.kt, 1), `${dec(a.kf, 1)} eget lag`) : ''}
+      ${a.poss != null ? tile('Bollinnehav', dec(a.poss, 0) + '\u00a0%') : ''}
     </div>
     <div class="panel"><h2>Statistik</h2>
       <div class="tablewrap"><table><thead><tr><th></th><th class="num">Alla</th><th class="num">Hemma</th><th class="num">Borta</th><th class="num">Senaste 6</th></tr></thead>
@@ -771,21 +782,21 @@ function viewTeam(id) {
 }
 
 async function fillTeamMatches(t) {
-  const rows = await leagueFile(t.lg);
+  const files = await Promise.all((t.comps && t.comps.length ? [...new Set([t.lg, ...t.comps])] : [t.lg]).map(leagueFile));
   const el = $('#teamMatches');
   if (!el || location.hash.slice(1) !== 'lag-' + t.id) return;
-  const ms = rows.filter(m => m.hid === t.id || m.aid === t.id).slice(0, 60);
+  const ms = files.flat().filter(m => m.hid === t.id || m.aid === t.id).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 80);
   if (!ms.length) { el.textContent = 'Inga matcher hittades.'; return; }
   el.classList.remove('muted');
   let season = null;
-  el.innerHTML = `<div class="tablewrap"><table><thead><tr><th>Datum</th><th></th><th>Motstånd</th><th class="num">Resultat</th><th class="num">Halvtid</th><th class="num">xG</th><th class="num">Skott på mål</th><th class="num">Hörnor</th><th class="num">Kort</th><th class="num">Odds</th><th>Domare</th></tr></thead><tbody>${ms.map(m => {
+  el.innerHTML = `<div class="tablewrap"><table><thead><tr><th>Datum</th><th>Tävling</th><th></th><th>Motstånd</th><th class="num">Resultat</th><th class="num">Halvtid</th><th class="num">xG</th><th class="num">Skott på mål</th><th class="num">Hörnor</th><th class="num">Kort</th><th class="num">Odds</th><th>Domare</th></tr></thead><tbody>${ms.map(m => {
     const home = m.hid === t.id;
     const gf = home ? m.hg : m.ag, ga = home ? m.ag : m.hg;
     const r = gf > ga ? 'V' : gf === ga ? 'O' : 'F';
     const pick = (h, a) => (h == null ? '–' : (home ? `${h}–${a}` : `${a}–${h}`));
     let head = '';
-    if (m.season !== season) { season = m.season; head = `<tr class="group-row"><td colspan="11">Säsong ${esc(seasonLabel(season))}</td></tr>`; }
-    return head + `<tr><td class="faint">${shortDate(m.date)}</td><td>${home ? 'H' : 'B'}</td><td>${teamLink(home ? m.aid : m.hid, home ? m.away : m.home)}</td>
+    if (m.lg === t.lg && m.season !== season) { season = m.season; head = `<tr class="group-row"><td colspan="12">Säsong ${esc(seasonLabel(season))}</td></tr>`; }
+    return head + `<tr><td class="faint">${shortDate(m.date)}</td><td class="small muted">${esc(lgShort(m.lg))}</td><td>${home ? 'H' : 'B'}</td><td>${teamLink(home ? m.aid : m.hid, home ? m.away : m.home)}</td>
       <td class="num">${formChips(r)} <b>${gf}–${ga}</b></td><td class="num">${pick(m.hthg, m.htag)}</td>
       <td class="num">${m.hxg != null ? (home ? `${dec(m.hxg, 1)}–${dec(m.axg, 1)}` : `${dec(m.axg, 1)}–${dec(m.hxg, 1)}`) : '–'}</td>
       <td class="num">${pick(m.hst, m.ast)}</td><td class="num">${pick(m.hc, m.ac)}</td>
@@ -836,7 +847,7 @@ function viewRef(id) {
   return `<div class="stack">
     <div class="panel stack"><span class="eyebrow">Domare · ${r.leagues.map(([l, n]) => `${esc(lgShort(l))} (${n})`).join(', ')}</span><h1>${esc(r.name)}</h1>
       <div class="small muted">${r.n} matcher förra och denna säsong, senast ${shortDate(r.last)}. Denna säsong ${r.nCur} matcher med ${dec(r.kCur)} kort per match.</div></div>
-    ${up.length ? `<div><h2 style="margin-bottom:8px">Kommande matcher</h2><div class="lggroup">${up.map(mrow).join('')}</div></div>` : ''}
+    ${up.length ? `<div><h2 style="margin-bottom:8px">Kommande matcher</h2>${fixtureGroups(up)}</div>` : ''}
     <div class="tiles">
       ${tile('Kort per match', dec(r.k), `${dec(r.y)} gula · ${dec(r.rd)} röda`)}
       ${tile('Kortfaktor', dec(r.kf), 'jämfört med ligasnittet')}
@@ -856,18 +867,40 @@ function viewRef(id) {
 
 // ------------------------------------------------------------------ vy: ligor
 function viewLigor() {
-  const cards = order().map(lg => {
+  const card = lg => {
     const L = S.leagues[lg], s = L.stats;
     return `<a class="lgcard" href="#liga-${lg}"><div><div class="eyebrow">${esc(L.country)}</div><h3>${esc(L.name)}</h3></div>
       <div class="small muted">${L.season} · ${L.matches} matcher spelade${L.fixtures ? ` · ${L.fixtures} kommande` : ''}</div>
       <dl><div><dt>Mål/match</dt><dd>${dec(s.gpm)}</dd></div><div><dt>Över 2,5</dt><dd>${pct(s.o25)}</dd></div><div><dt>BLGM</dt><dd>${pct(s.btts)}</dd></div>
       <div><dt>1 / X / 2</dt><dd>${s.hw != null ? `${Math.round(s.hw * 100)}/${Math.round(s.dr * 100)}/${Math.round(s.aw * 100)}` : '–'}</dd></div><div><dt>Hörnor</dt><dd>${dec(s.ct, 1)}</dd></div><div><dt>Kort</dt><dd>${dec(s.kt, 1)}</dd></div></dl></a>`;
-  }).join('');
-  return `<div class="stack"><div><h1>Ligor</h1><p class="lead">${order().length} europeiska ligor. Siffrorna gäller innevarande säsong. 1 / X / 2 är andelen hemmavinster, oavgjorda och bortavinster i procent.</p></div><div class="lgcards">${cards}</div></div>`;
+  };
+  const all = order();
+  const groups = [
+    ['Europacuper', all.filter(lg => S.leagues[lg].country === 'Europa')],
+    ['Ligor', all.filter(lg => S.leagues[lg].kind !== 'cup')],
+    ['Nationella cuper', all.filter(lg => S.leagues[lg].kind === 'cup' && S.leagues[lg].country !== 'Europa')],
+  ].filter(g => g[1].length);
+  const nLeagues = all.filter(lg => S.leagues[lg].kind !== 'cup').length;
+  return `<div class="stack"><div><h1>Ligor och cuper</h1><p class="lead">${nLeagues} europeiska ligor och ${all.length - nLeagues} cuper. Siffrorna gäller innevarande säsong. 1 / X / 2 är andelen hemmavinster, oavgjorda och bortavinster i procent.</p></div>
+    ${groups.map(([n, lgs]) => `<h2>${n}</h2><div class="lgcards">${lgs.map(card).join('')}</div>`).join('')}</div>`;
+}
+
+async function fillLeagueResults(lg) {
+  const rows = (await leagueFile(lg)).slice(0, 30);
+  const el = $('#lgResults');
+  if (!el || location.hash.slice(1) !== 'liga-' + lg) return;
+  if (!rows.length) { el.textContent = 'Inga resultat.'; return; }
+  el.classList.remove('muted');
+  el.innerHTML = `<div class="tablewrap"><table><thead><tr><th>Datum</th><th>Match</th><th class="num">Resultat</th><th class="num">Halvtid</th><th class="num">Hörnor</th><th class="num">Kort</th><th class="num">Skott på mål</th><th class="num">Bollinnehav</th></tr></thead><tbody>${rows.map(m =>
+    `<tr><td class="faint">${shortDate(m.date)}</td><td>${teamLink(m.hid, m.home)} – ${teamLink(m.aid, m.away)}</td><td class="num"><b>${m.hg}–${m.ag}</b></td>
+     <td class="num">${m.hthg != null ? `${m.hthg}–${m.htag}` : '–'}</td><td class="num">${m.hc != null ? `${m.hc}–${m.ac}` : '–'}</td>
+     <td class="num">${m.hy != null ? `${m.hy + (m.hr || 0)}–${m.ay + (m.ar || 0)}` : '–'}</td><td class="num">${m.hst != null ? `${m.hst}–${m.ast}` : '–'}</td>
+     <td class="num">${m.hpos != null ? `${Math.round(m.hpos)}–${Math.round(m.apos)}` : '–'}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function viewLiga(lg) {
   const L = S.leagues[lg];
+  setTimeout(() => fillLeagueResults(lg), 0);
   if (!L) return `<div class="panel"><h2>Ligan hittades inte</h2><p><a href="#ligor">Till alla ligor</a></p></div>`;
   const s = L.stats;
   const fx = S.fx.filter(f => f.lg === lg);
@@ -877,7 +910,7 @@ function viewLiga(lg) {
     return sorted.length ? `<div class="panel"><h3>${n}</h3><table style="margin-top:6px"><tbody>${sorted.map(t => `<tr><td>${teamLink(t.id, t.name)}</td><td class="num"><b>${fm(t.all[k])}</b></td></tr>`).join('')}</tbody></table></div>` : '';
   };
   return `<div class="stack">
-    <div><span class="eyebrow">${esc(L.country)} · säsong ${esc(L.season)}</span><h1>${esc(L.name)}</h1><p class="lead">${L.matches} matcher spelade, senast ${L.last ? shortDate(L.last) : '–'}. ${L.hasStats ? '' : 'För den här ligan finns bara resultat och odds, inte skott, hörnor eller kort.'}</p></div>
+    <div><span class="eyebrow">${esc(L.country)} · säsong ${esc(L.season)}</span><h1>${esc(L.name)}</h1><p class="lead">${L.matches} matcher spelade, senast ${L.last ? shortDate(L.last) : '–'}. ${L.hasStats ? '' : 'För den här ligan finns bara resultat och odds, inte skott, hörnor eller kort (ingen gratis källa har det).'}${L.kind === 'cup' ? ' Lagens statistik och styrka kommer från deras ligor och alla cupmatcher, så lag från olika länder går att jämföra.' : ''}</p></div>
     <div class="tiles">
       ${tile('Mål per match', dec(s.gpm), `${dec(s.hg)} hemma, ${dec(s.ag)} borta`)}
       ${tile('1 / X / 2', s.hw != null ? `${Math.round(s.hw * 100)}/${Math.round(s.dr * 100)}/${Math.round(s.aw * 100)}` : '–', 'procent')}
@@ -888,13 +921,14 @@ function viewLiga(lg) {
       ${s.homeAdv ? tile('Hemmafördel', `${sgn(s.homeAdv - 1, 0)}`, 'fler mål på hemmaplan enligt modellen') : ''}
     </div>
     ${fx.length ? `<div><h2 style="margin-bottom:8px">Kommande matcher</h2>${fixtureGroups(fx)}</div>` : ''}
-    <div class="panel"><h2>Tabell</h2><div class="tablewrap" style="margin-top:8px"><table><thead><tr><th class="num">#</th><th>Lag</th><th class="num">M</th><th class="num">V</th><th class="num">O</th><th class="num">F</th><th class="num">Mål</th><th class="num">+/−</th><th class="num">P</th>${L.hasXg ? '<th class="num">xG</th><th class="num">xG emot</th>' : ''}<th>Form</th><th class="num" title="Modellens styrka: förväntad målskillnad per match mot ett snittlag">Styrka</th></tr></thead>
+    ${L.table.length ? `<div class="panel"><h2>${L.kind === 'cup' ? 'Tabell, alla matcher i turneringen' : 'Tabell'}</h2>${L.kind === 'cup' ? '<p class="note">Räknad från alla matcher denna säsong, även kvalet och slutspelet om de spelats. Under ligaspelet är det samma som UEFA:s tabell.</p>' : ''}<div class="tablewrap" style="margin-top:8px"><table><thead><tr><th class="num">#</th><th>Lag</th><th class="num">M</th><th class="num">V</th><th class="num">O</th><th class="num">F</th><th class="num">Mål</th><th class="num">+/−</th><th class="num">P</th>${L.hasXg ? '<th class="num">xG</th><th class="num">xG emot</th>' : ''}<th>Form</th><th class="num" title="Modellens styrka: förväntad målskillnad per match mot ett snittlag">Styrka</th></tr></thead>
     <tbody>${L.table.map(r => `<tr><td class="num">${r.pos}</td><td>${teamLink(r.id, r.name)}</td><td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td><td class="num">${r.gf}–${r.ga}</td><td class="num">${r.gf - r.ga > 0 ? '+' : ''}${r.gf - r.ga}</td><td class="num"><b>${r.pts}</b></td>${L.hasXg ? `<td class="num">${dec(r.xgf, 1)}</td><td class="num">${dec(r.xga, 1)}</td>` : ''}<td>${formChips(r.form)}</td><td class="num">${r.net != null ? (r.net > 0 ? '+' : '') + dec(r.net) : '–'}</td></tr>`).join('')}</tbody></table></div>
-    <p class="note">Tabellen är räknad från resultaten och tar inte hänsyn till poängavdrag eller slutspelsserier.</p></div>
-    <div class="grid3">
+    <p class="note">Tabellen är räknad från resultaten och tar inte hänsyn till poängavdrag eller slutspelsserier.</p></div>` : ''}
+    <div class="panel"><h2>Senaste resultat</h2><div id="lgResults" class="muted">Laddar …</div></div>
+    ${L.kind === 'cup' ? '' : `<div class="grid3">
       ${top('o25', 'Flest matcher över 2,5 mål', pct)}${top('btts', 'Oftast båda lagen gör mål', pct)}${top('cs', 'Oftast hållit nollan', pct)}
       ${top('ct', 'Flest hörnor per match', x => dec(x, 1))}${top('kt', 'Flest kort per match', x => dec(x, 1))}${top('roiW', 'Bäst att spela på (vinst)', x => sgn(x, 0))}
-    </div>
+    </div>`}
   </div>`;
 }
 
@@ -962,7 +996,7 @@ function viewModell() {
       <div class="panel"><h2>Värdespel per liga</h2><p class="note">Spel med minst 5 % värde mot snittodds, ${esc(per.namn.toLowerCase())}.</p>
         ${per.ligor.length ? `<div class="tablewrap" style="margin-top:8px"><table><thead><tr><th>Liga</th><th class="num">Spel</th><th class="num">Resultat</th></tr></thead><tbody>${sortRows(per.ligor, 'roi', false).map(r => `<tr><td>${esc(lgName(r.lg))}</td><td class="num">${r.n}</td><td class="num"><b class="${r.roi > 0 ? 'good' : 'bad'}">${sgn(r.roi, 0)}</b></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Inga sådana spel mot snittodds.</p>'}</div>
     </div>
-    <div class="panel"><h2>Data</h2><p class="note">Resultat, statistik, domare och odds kommer från football-data.co.uk och uppdateras varje dag. Odds för kommande matcher publiceras oftast fredag (helgmatcher) och tisdag (veckomatcher). xG finns från säsongen 2026/27 i de flesta huvudligor, annars används skott på mål. Extraligorna (Österrike, Danmark, Finland, Irland, Norge, Polen, Rumänien, Ryssland, Sverige och Schweiz) har bara resultat och stängningsodds.</p></div>
+    <div class="panel"><h2>Data</h2><p class="note">Resultat, statistik, domare och odds för 22 huvudligor och resultat och odds för 10 extraligor kommer från football-data.co.uk. Europacuperna, de stora nationella cuperna, Eerste Divisie, bollinnehav, spelschemat en vecka framåt och hörnor, kort och skott för Sverige, Norge, Danmark, Österrike och Ryssland kommer från ESPN, med odds från DraftKings. Allt uppdateras varje dag. xG finns från 2026/27 i de flesta huvudligor, annars används skott på mål. Domare finns bara för England och Skottland. För Schweiz, Polen, Rumänien, Finland och Irland finns bara resultat och odds. Cupmatcherna ingår inte i backtestet.</p></div>
   </div>`;
 }
 

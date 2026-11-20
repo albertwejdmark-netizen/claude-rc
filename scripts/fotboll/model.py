@@ -35,8 +35,8 @@ class Fit:
         self.att, self.de, self.home, self.c = att, de, home, c
         self.n_eff = n_eff
 
-    def lambdas(self, h, a, prior=None):
-        """Förväntade mål (hemma, borta). Okända lag får startgissningen."""
+    def lambdas(self, h, a, prior=None, neutral=False):
+        """Förväntade mål (hemma, borta). Okända lag får startgissningen. Neutral plan = ingen hemmafördel."""
         prior = prior or {}
 
         def get(t):
@@ -48,7 +48,8 @@ class Fit:
 
         ah, dh = get(h)
         aa, da = get(a)
-        return math.exp(self.c + self.home + ah + da), math.exp(self.c + aa + dh)
+        hadv = self.home / 2 if neutral else self.home
+        return math.exp(self.c + hadv + ah + da), math.exp(self.c + (self.home / 2 if neutral else 0) + aa + dh)
 
     def rating(self, t):
         """Anfall, försvar (förväntade mål för/emot mot ett snittlag på neutral plan)."""
@@ -60,7 +61,7 @@ class Fit:
 
 
 def fit(rows, ref_ordinal, prior=None, half_life=HALF_LIFE, xg_weight=XG_WEIGHT, k=PRIOR_K, init=None, iters=60):
-    """rows: lista av (datum-ordinal, hemma, borta, hemmamål, bortamål, hxg, axg).
+    """rows: lista av (datum-ordinal, hemma, borta, hemmamål, bortamål, hxg, axg[, hemmaplan 1/0]).
     hxg/axg kan vara riktig xG eller en skattning från skott på mål (se build.rows_for_fit).
     prior: {lag: anfallsgissning (log)}; försvaret får motsatt tecken."""
     prior = prior or {}
@@ -79,6 +80,7 @@ def fit(rows, ref_ordinal, prior=None, half_life=HALF_LIFE, xg_weight=XG_WEIGHT,
     yh = np.where(has, (1 - xg_weight) * gh + xg_weight * np.nan_to_num(xh), gh)
     ya = np.where(has, (1 - xg_weight) * ga + xg_weight * np.nan_to_num(xa), ga)
     age = ref_ordinal - np.array([r[0] for r in rows], float)
+    hh = np.array([r[7] if len(r) > 7 else 1.0 for r in rows], float)  # 0 = neutral plan
     w = np.exp(-math.log(2) / half_life * np.maximum(age, 0))
     pa = np.array([prior.get(t, 0.0) for t in teams])
     pd = -pa
@@ -95,13 +97,13 @@ def fit(rows, ref_ordinal, prior=None, half_life=HALF_LIFE, xg_weight=XG_WEIGHT,
     for _ in range(iters):
         b = math.exp(c + home / 2)
         num = np.bincount(H, w * yh, T) + np.bincount(A, w * ya, T) + k * b * np.exp(pa)
-        den = np.bincount(H, w * np.exp(c + home + de[A]), T) + np.bincount(A, w * np.exp(c + de[H]), T) + k * b
+        den = np.bincount(H, w * np.exp(c + home * hh + de[A]), T) + np.bincount(A, w * np.exp(c + de[H]), T) + k * b
         att_new = np.log(num / den)
         num = np.bincount(A, w * yh, T) + np.bincount(H, w * ya, T) + k * b * np.exp(pd)
-        den = np.bincount(A, w * np.exp(c + home + att_new[H]), T) + np.bincount(H, w * np.exp(c + att_new[A]), T) + k * b
+        den = np.bincount(A, w * np.exp(c + home * hh + att_new[H]), T) + np.bincount(H, w * np.exp(c + att_new[A]), T) + k * b
         de_new = np.log(num / den)
-        home = math.log((w * yh).sum() / (w * np.exp(c + att_new[H] + de_new[A])).sum())
-        c = math.log((w * (yh + ya)).sum() / (w * (np.exp(home + att_new[H] + de_new[A]) + np.exp(att_new[A] + de_new[H]))).sum())
+        home = math.log((w * hh * yh).sum() / (w * hh * np.exp(c + att_new[H] + de_new[A])).sum())
+        c = math.log((w * (yh + ya)).sum() / (w * (np.exp(home * hh + att_new[H] + de_new[A]) + np.exp(att_new[A] + de_new[H]))).sum())
         ma, md = att_new.mean(), de_new.mean()
         att_new -= ma
         de_new -= md
@@ -152,20 +154,29 @@ def devig(odds):
     return [x / s for x in inv]
 
 
-def market_lambdas(p1x2, pover=None, iters=12):
+def over_line(M, lines):
+    """P(totalt antal mål > linje) per rad. M: (N, n, n), lines: (N,)"""
+    tot = (_I + _J)[None, :, :]
+    return (M * (tot > np.asarray(lines, float)[:, None, None])).sum((1, 2))
+
+
+def market_lambdas(p1x2, pover=None, lines=None, iters=12):
     """Förväntade mål som bäst återskapar marknadens sannolikheter (vektoriserat).
-    p1x2: (N, 3), pover: (N,) eller None/nan där O/U saknas."""
+    p1x2: (N, 3), pover: (N,) chans till över mållinjen (nan där O/U saknas), lines: mållinjen (standard 2,5)."""
     p1x2 = np.asarray(p1x2, float)
     N = len(p1x2)
     pover = np.full(N, np.nan) if pover is None else np.asarray(pover, float)
+    lines = np.full(N, 2.5) if lines is None else np.asarray(lines, float)
     has_ou = ~np.isnan(pover)
     # startgissning: totalt 2,6 mål, fördelning efter styrkeskillnad
-    tot = np.where(has_ou, 2.6 + 2.0 * (np.nan_to_num(pover) - 0.5), 2.6)
+    tot = np.where(has_ou, lines + 0.1 + 2.0 * (np.nan_to_num(pover) - 0.5), 2.6)
     sup = 1.6 * (p1x2[:, 0] - p1x2[:, 2])
     x = np.stack([np.log(np.maximum((tot + sup) / 2, 0.15)), np.log(np.maximum((tot - sup) / 2, 0.15))], 1)
 
     def resid(x):
-        h, d, a, o = basic(np.exp(x[:, 0]), np.exp(x[:, 1]))
+        M = matrix(np.exp(x[:, 0]), np.exp(x[:, 1]))
+        h, d, a = (M * _HW).sum((1, 2)), (M * _DR).sum((1, 2)), (M * _AW).sum((1, 2))
+        o = over_line(M, lines)
         r = np.stack([h - p1x2[:, 0], a - p1x2[:, 2], d - p1x2[:, 1], np.where(has_ou, o - np.nan_to_num(pover), 0.0)], 1)
         return r
 

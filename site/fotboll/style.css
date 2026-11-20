@@ -146,7 +146,7 @@ td.wrap{white-space:normal;min-width:180px}
 
 /* ---------- matchlista */
 .daygroup{display:flex;flex-direction:column;gap:8px}
-.daytitle{font-family:var(--font-display);font-size:21px;font-weight:600;margin-top:6px;text-transform:capitalize}
+.daytitle{font-family:var(--font-display);font-size:21px;font-weight:600;margin-top:6px}
 .lggroup{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
 .lghead{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 14px;background:var(--panel-2);border-bottom:1px solid var(--line);font-size:13px}
 .lghead a{color:var(--text);font-weight:600}
