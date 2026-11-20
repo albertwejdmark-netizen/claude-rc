@@ -243,6 +243,13 @@ footer{max-width:1200px;margin:0 auto;padding:4px 16px 30px;font-size:12px;color
           <option value="10">Senaste 10 dagarna</option>
           <option value="21">Senaste månaden</option>
         </select>
+        <select id="scanPreset">
+          <option value="breakout">Utbrott med volym</option>
+          <option value="bounce">Studs på stöd</option>
+          <option value="classic">Ursprungliga reglerna</option>
+          <option value="custom">Egna inställningar</option>
+        </select>
+        <select id="scanSector"><option value="">Alla sektorer</option></select>
         <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="scanActive" checked> Bara aktiva</label>
       </div>
       <p id="scanStatus" class="muted small" style="margin:0 0 10px"></p>
@@ -490,7 +497,7 @@ function showData(d){
   d.candles.sort((a,b)=> a[0] < b[0] ? -1 : 1);
   state.data = d;
   $("title").textContent = d.name && d.name !== d.symbol ? d.name : d.symbol;
-  $("subtitle").textContent = (d.name && d.name !== d.symbol ? d.symbol + " · " : "") + d.candles.length + " handelsdagar" + (d.source ? " · " + d.source : "");
+  $("subtitle").textContent = (d.name && d.name !== d.symbol ? d.symbol + " · " : "") + (d.sector ? (SECTOR_SV[d.sector] || d.sector) + " · " : "") + d.candles.length + " handelsdagar" + (d.source ? " · " + d.source : "");
   $("content").hidden = false; $("message").hidden = true;
   render();
 }
@@ -527,6 +534,8 @@ async function loadIndex(){
       try { const m = await (await fetch("data/" + idx.market, {cache:"no-cache"})).json(); state.market = marketRegime(m.candles); } catch {}
     }
     $("stocklist").innerHTML = state.index.map(s => `<option value="${esc(s.symbol)}">${esc(s.name||"")}</option>`).join("");
+    const sectors = [...new Set(state.index.map(s => s.sector).filter(Boolean))].sort();
+    $("scanSector").innerHTML = `<option value="">Alla sektorer</option>` + sectors.map(x => `<option value="${esc(x)}">${esc(SECTOR_SV[x] || x)}</option>`).join("");
     if (idx.updated) $("updated").textContent = state.index.length + " aktier · uppdaterad " + new Date(idx.updated).toLocaleString("sv-SE",{dateStyle:"short",timeStyle:"short"});
   } catch { state.index = []; }
   let start = decodeURIComponent(location.hash.slice(1));
@@ -538,26 +547,54 @@ async function loadIndex(){
 }
 
 /* ---------- Signalöversikt ---------- */
+const SECTOR_SV = {
+  "Communication Services":"Kommunikationstjänster", "Consumer Discretionary":"Sällanköpsvaror", "Consumer Staples":"Dagligvaror",
+  "Energy":"Energi", "Financials":"Finans", "Health Care":"Hälsovård", "Industrials":"Industri",
+  "Information Technology":"Informationsteknik", "Materials":"Material", "Real Estate":"Fastigheter", "Utilities":"Kraftförsörjning",
+};
 let scanToken = 0;
+async function loadSignals(){
+  if (state.signals !== undefined) return state.signals;
+  try { const r = await fetch("data/signals.json", {cache:"no-cache"}); state.signals = r.ok ? await r.json() : null; }
+  catch { state.signals = null; }
+  return state.signals;
+}
 async function runScan(){
   const token = ++scanToken;
   const o = opts(), days = +$("scanDays").value, onlyActive = $("scanActive").checked;
+  const sector = $("scanSector").value, preset = $("preset").value;
   if (!state.index.length){ $("scanStatus").textContent = "Ingen kursdata finns än."; $("scanRows").innerHTML = ""; return; }
-  const results = []; let done = 0;
-  const queue = [...state.index];
+  const universe = state.index.filter(s => !sector || s.sector === sector);
+  const results = []; let done = 0, total = universe.length, pre = false;
   const draw = () => {
     const rows = results
       .filter(r => !onlyActive || r.s.out.res === "open" || r.s.out.running)
       .sort((x,y) => x.s.date === y.s.date ? y.s.rr - x.s.rr : (x.s.date < y.s.date ? 1 : -1));
     $("scanRows").innerHTML = rows.length ? rows.map(r => `<tr class="click" data-sym="${esc(r.item.symbol)}">
-      <td><b>${esc(r.item.symbol)}</b> <span class="muted small">${esc((r.item.name||"").slice(0,28))}</span></td>
+      <td><b>${esc(r.item.symbol)}</b> <span class="muted small">${esc((r.item.name||"").slice(0,28))}</span><br><span class="muted small">${esc(r.item.sector||"")}</span></td>
       <td>${fmt(r.close)}</td><td class="l">${r.s.kind}</td><td>${r.s.date}</td><td>${fmt(r.s.entry)}</td>
       <td class="sl">${fmt(r.s.stop)}</td><td class="tp">${fmt(r.s.tps[0].price)}</td><td class="tp">${fmt(r.s.tps[1].price)}</td><td>${num1(r.s.rr)}</td><td class="l">${outText(r.s.out)}</td></tr>`).join("")
-      : `<tr><td colspan="10" class="muted" style="text-align:center;padding:20px">${done < state.index.length ? "Letar…" : "Inga signaler med valda filter."}</td></tr>`;
-    $("scanStatus").textContent = done < state.index.length
-      ? `Skannar ${done} av ${state.index.length} aktier…`
-      : `${rows.length} ${rows.length === 1 ? "signal" : "signaler"} bland ${state.index.length} aktier.`;
+      : `<tr><td colspan="10" class="muted" style="text-align:center;padding:20px">${done < total ? "Letar…" : "Inga signaler med valda filter."}</td></tr>`;
+    $("scanStatus").textContent = done < total
+      ? `Skannar ${done} av ${total} aktier… (egna inställningar räknas fram i webbläsaren)`
+      : `${rows.length} ${rows.length === 1 ? "signal" : "signaler"} bland ${total} aktier` + (pre ? ` · strategi: ${$("preset").selectedOptions[0].textContent}` : " · egna inställningar") + ".";
   };
+
+  // Färdig strategi: använd översikten som GitHub räknat fram i förväg
+  const sig = preset !== "custom" ? await loadSignals() : null;
+  if (token !== scanToken) return;
+  if (sig && sig.presets && sig.presets[preset] && days <= sig.days){
+    pre = true;
+    for (const r of sig.presets[preset]){
+      if (r.daysAgo >= days || (sector && r.sector !== sector)) continue;
+      results.push({ item:{symbol:r.symbol, name:r.name, sector:r.sector}, close:r.close,
+                     s:{...r, tps:r.tps.map(price => ({price}))} });
+    }
+    done = total; draw(); return;
+  }
+
+  // Egna inställningar: räkna i webbläsaren
+  const queue = [...universe];
   const worker = async () => {
     while (queue.length && token === scanToken){
       const item = queue.shift();
@@ -571,7 +608,7 @@ async function runScan(){
         }
       } catch {}
       done++;
-      if (token === scanToken && (done % 8 === 0 || done === state.index.length)) draw();
+      if (token === scanToken && (done % 10 === 0 || done === total)) draw();
       await new Promise(r => setTimeout(r, 0)); // låt sidan andas
     }
   };
@@ -580,12 +617,13 @@ async function runScan(){
   if (token === scanToken) draw();
 }
 $("scanRows").addEventListener("click", e => { const tr = e.target.closest("tr[data-sym]"); if (tr) loadSymbol(tr.dataset.sym); });
-["scanDays","scanActive"].forEach(id => $(id).addEventListener("change", runScan));
+["scanDays","scanActive","scanSector"].forEach(id => $(id).addEventListener("change", runScan));
+$("scanPreset").addEventListener("change", () => { applyPreset($("scanPreset").value); render(); runScan(); });
 
 function setView(v){
   $("viewChart").hidden = v !== "chart"; $("viewScan").hidden = v !== "scan";
   $("tabChart").classList.toggle("on", v === "chart"); $("tabScan").classList.toggle("on", v === "scan");
-  if (v === "scan") runScan();
+  if (v === "scan"){ $("scanPreset").value = $("preset").value; runScan(); }
 }
 $("tabChart").onclick = () => setView("chart");
 $("tabScan").onclick = () => setView("scan");
@@ -652,6 +690,7 @@ $("search").addEventListener("change", e => { const v = e.target.value.trim(); i
 ["period","win","tol","minT","maxN","pivBase","zones","markers","showSig","showPlan"].forEach(id => $(id).addEventListener("input", render));
 SIG_KEYS.forEach(id => $(id).addEventListener("input", () => { applyPreset("custom"); render(); }));
 $("preset").addEventListener("input", () => { applyPreset($("preset").value); render(); });
+$("preset").addEventListener("change", () => { if (!$("viewScan").hidden) runScan(); });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { state.chart?.remove(); state.chart = null; render(); });
 loadIndex();
 </script>
