@@ -5,17 +5,17 @@
   const E = {};
 
   /* Färdiga strategier. Siffrorna i kommentarerna kommer från backtestet
-     (scripts/backtest.js) på 122 amerikanska aktier: inställningarna valdes på
-     data före 2025 och kontrollerades på data från 2025 (kontrollsiffror nedan).
+     (scripts/backtest.js). Inställningarna valdes på 122 amerikanska aktier, data före
+     2025. Kontrollsiffrorna nedan gäller alla ~506 aktier i S&P 500, data från 2025.
      Vinst = TP1 nås före stoploss. */
   E.PRESETS = {
-    // Kontroll: 55 % vinst, +0,15 R per affär
+    // Kontroll: 52 % vinst, +0,10 R per affär
     breakout: { types: "breakout", trend: "none", minVol: 1.8, minClosePos: 0.75, minRespect: 0.6,
                 market: false, maxRsi: 0, minRR: 0, slMode: "atr3", tpMode: "r" },
-    // Kontroll: 61 % vinst, +0,06 R per affär
+    // Kontroll: 61 % vinst, +0,04 R per affär
     bounce:   { types: "bounce", trend: "sma50", minVol: 0, minClosePos: 0.5, minRespect: 0.6,
                 market: false, maxRsi: 70, minRR: 0, slMode: "atr3", tpMode: "levels" },
-    // Ursprungliga reglerna. Kontroll: 38 % vinst, +0,08 R per affär
+    // Ursprungliga reglerna. Kontroll: 37 % vinst, +0,04 R per affär
     classic:  { types: "both", trend: "sma50", minVol: 0, minClosePos: 0, minRespect: 0,
                 market: false, maxRsi: 0, minRR: 1, slMode: "level", tpMode: "levels" },
   };
