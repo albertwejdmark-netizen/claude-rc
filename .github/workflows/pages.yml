@@ -6,6 +6,8 @@ on:
   schedule:
     - cron: "17 17 * * 1-5" # vardagar efter stängning i Stockholm (UTC)
     - cron: "43 22 * * 1-5" # vardagar efter stängning i USA (UTC)
+    - cron: "7 6 * * *" # varje morgon, även helger: nya fotbollsresultat
+    - cron: "11 16 * * 2,5" # tisdag och fredag eftermiddag: nya fotbollsodds
   workflow_dispatch:
 
 permissions:
@@ -29,12 +31,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install yfinance
+      - run: pip install yfinance numpy
       - run: python scripts/fetch_data.py
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
       - run: node scripts/scan.js
+      - name: Fotbollsdata (site/fotboll)
+        run: python scripts/fotboll/build.py
+        continue-on-error: true # aktiesidan publiceras även om fotbollskällan inte svarar
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
