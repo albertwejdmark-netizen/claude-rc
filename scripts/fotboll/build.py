@@ -28,6 +28,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import data as D  # noqa: E402
+import espn as X  # noqa: E402
 import model as M  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -70,7 +71,8 @@ def make_priors(matches, info):
         if lg in prev_lgs:
             return 0.0
         tier = info[lg]["tier"]
-        if any(info[p]["tier"] < tier and info[p]["country"] == info[lg]["country"] for p in prev_lgs if p in info):
+        if any(info[p]["kind"] != "cup" and info[p]["tier"] < tier and info[p]["country"] == info[lg]["country"]
+               for p in prev_lgs if p in info):
             return 0.20
         return -0.15
 
@@ -93,7 +95,7 @@ def rows_for_fit(ms):
         hx, ax = m.get("hxg"), m.get("axg")
         if (hx is None or ax is None) and conv and m.get("hst") is not None and m.get("ast") is not None:
             hx, ax = m["hst"] * conv, m["ast"] * conv
-        out.append((m["date"].toordinal(), m["hid"], m["aid"], m["hg"], m["ag"], hx, ax))
+        out.append((m["date"].toordinal(), m["hid"], m["aid"], m["hg"], m["ag"], hx, ax, 0.0 if m.get("neutral") else 1.0))
     return out
 
 
@@ -107,6 +109,8 @@ def backtest(by_lg, info, prior_fn, params=None):
     params = params or {}
     recs = []
     for lg, ms in by_lg.items():
+        if info[lg]["kind"] == "cup":
+            continue  # cuperna saknar historiska odds och tippas med den gemensamma modellen
         test_seasons = info[lg]["seasons"][:2]
         test = [m for m in ms if m["season"] in test_seasons]
         if not test:
@@ -138,23 +142,28 @@ def backtest(by_lg, info, prior_fn, params=None):
 
 
 def market_probs(m):
+    """(1X2 utan marginal, chans till över mållinjen, mållinjen)."""
     o = m["odds"]
     p1x2 = M.devig(o["1x2"]["avg"]) if "1x2" in o and "avg" in o["1x2"] else None
-    pov = M.devig(o["ou25"]["avg"])[0] if "ou25" in o and "avg" in o["ou25"] else None
-    return p1x2, pov
+    if "ou25" in o and "avg" in o["ou25"]:
+        return p1x2, M.devig(o["ou25"]["avg"])[0], 2.5
+    if "ou_other" in o:
+        return p1x2, M.devig(o["ou_other"]["odds"])[0], o["ou_other"]["line"]
+    return p1x2, None, 2.5
 
 
 def add_market_lambdas(items, get_match):
     """Lägger till marknadens förväntade mål ('mk') för poster med 1X2-odds."""
-    idx, P1, PO = [], [], []
+    idx, P1, PO, LN = [], [], [], []
     for k, it in enumerate(items):
-        p1x2, pov = market_probs(get_match(it))
+        p1x2, pov, line = market_probs(get_match(it))
         if p1x2:
             idx.append(k)
             P1.append(p1x2)
             PO.append(np.nan if pov is None else pov)
+            LN.append(line)
     if idx:
-        lh, la = M.market_lambdas(np.array(P1), np.array(PO))
+        lh, la = M.market_lambdas(np.array(P1), np.array(PO), np.array(LN))
         for j, k in enumerate(idx):
             items[k]["mk"] = (float(lh[j]), float(la[j]))
     for it in items:
@@ -370,6 +379,45 @@ def side_model(ms, ref_ord, key_h, key_a, half_life=180.0, k=6.0):
     return {"avg_h": avg_h, "avg_a": avg_a, "ff": ff, "fa": fa, "ratio": max(1.0, num / den)}
 
 
+def side_model_global(ms, ref_ord, key_h, key_a, half_life=180.0, k=6.0):
+    """Som side_model men över alla tävlingar: varje match jämförs med sin egen tävlings snitt,
+    så lagens faktorer blir jämförbara mellan ligor. Returnerar {tävling: modell} för tävlingens egna snitt."""
+    sel = [m for m in ms if m.get(key_h) is not None and m.get(key_a) is not None and ref_ord - m["date"].toordinal() <= 420]
+    if len(sel) < 30:
+        return {}
+    w = {id(m): math.exp(-math.log(2) / half_life * (ref_ord - m["date"].toordinal())) for m in sel}
+    lg_avg = {}
+    for lg in {m["lg"] for m in sel}:
+        lm = [m for m in sel if m["lg"] == lg]
+        sw = sum(w[id(m)] for m in lm)
+        ah, aa = sum(w[id(m)] * m[key_h] for m in lm) / sw, sum(w[id(m)] * m[key_a] for m in lm) / sw
+        if len(lm) >= 20 and ah > 0 and aa > 0:
+            lg_avg[lg] = (ah, aa)
+    f_for, f_ag = defaultdict(lambda: [0.0, 0.0]), defaultdict(lambda: [0.0, 0.0])
+    for m in sel:
+        if m["lg"] not in lg_avg:
+            continue
+        ah, aa = lg_avg[m["lg"]]
+        wi = w[id(m)]
+        for t, v, avg, tab in ((m["hid"], m[key_h], ah, f_for), (m["aid"], m[key_a], aa, f_for),
+                               (m["aid"], m[key_h], ah, f_ag), (m["hid"], m[key_a], aa, f_ag)):
+            tab[t][0] += wi * v / avg
+            tab[t][1] += wi
+    ff = {t: (s_ + k) / (n + k) for t, (s_, n) in f_for.items()}
+    fa = {t: (s_ + k) / (n + k) for t, (s_, n) in f_ag.items()}
+    out = {}
+    for lg, (ah, aa) in lg_avg.items():
+        num = den = 0.0
+        for m in sel:
+            if m["lg"] != lg:
+                continue
+            mu = ah * ff[m["hid"]] * fa[m["aid"]] + aa * ff[m["aid"]] * fa[m["hid"]]
+            num += w[id(m)] * (m[key_h] + m[key_a] - mu) ** 2
+            den += w[id(m)] * mu
+        out[lg] = {"avg_h": ah, "avg_a": aa, "ff": ff, "fa": fa, "ratio": max(1.0, num / den) if den else 1.2}
+    return out
+
+
 def expected(sm, h, a):
     if not sm:
         return None
@@ -396,6 +444,7 @@ def perspective(m, home):
         "sf": m.get(s + "s"), "sa": m.get(o + "s"), "stf": m.get(s + "st"), "sta": m.get(o + "st"),
         "cf": m.get(s + "c"), "ca": m.get(o + "c"), "kf": cards(m, s), "ka": cards(m, o),
         "ff": m.get(s + "f"), "fa": m.get(o + "f"), "xgf": m.get(s + "xg"), "xga": m.get(o + "xg"),
+        "pos": m.get(s + "pos"),
         "oW": (odds[0] if home else odds[2]) if odds else None, "oD": odds[1] if odds else None,
         "oL": (odds[2] if home else odds[0]) if odds else None,
         "oO": ou[0] if ou else None, "oU": ou[1] if ou else None,
@@ -453,6 +502,7 @@ def agg(rows):
         "sf": r(mean([x["sf"] for x in rows]), 1), "sa": r(mean([x["sa"] for x in rows]), 1),
         "stf": r(mean([x["stf"] for x in rows]), 1), "sta": r(mean([x["sta"] for x in rows]), 1),
         "ff": r(mean([x["ff"] for x in rows]), 1), "fa": r(mean([x["fa"] for x in rows]), 1),
+        "poss": r(mean([x["pos"] for x in rows]), 1),
         "roiW": r(roi(rows, "oW", lambda x: x["gf"] > x["ga"])),
         "roiD": r(roi(rows, "oD", lambda x: x["gf"] == x["ga"])),
         "roiL": r(roi(rows, "oL", lambda x: x["gf"] < x["ga"])),
@@ -502,7 +552,15 @@ def main():
     t0 = time.time()
     print("Hämtar data ...")
     matches, fixtures, info = D.load(CACHE, today, offline=args.offline)
-    print(f"  {len(matches)} spelade matcher, {len(fixtures)} kommande, {len(info)} ligor ({time.time() - t0:.0f} s)")
+    print(f"  football-data: {len(matches)} spelade matcher, {len(fixtures)} kommande, {len(info)} ligor ({time.time() - t0:.0f} s)")
+    try:
+        ev = X.load(CACHE, today, offline=args.offline)
+        matches, fixtures, info = X.integrate(matches, fixtures, info, ev, today, D.team_id, D.match_id, offline=args.offline)
+    except Exception as e:  # noqa: BLE001 – sidan fungerar utan ESPN, bara med mindre data
+        print(f"  ESPN gick inte att använda: {e}", file=sys.stderr)
+    matches.sort(key=lambda m: (m["ko"], m["lg"], m["home"]))
+    fixtures.sort(key=lambda m: (m["ko"], m["lg"], m["home"]))
+    print(f"  totalt {len(matches)} spelade matcher, {len(fixtures)} kommande, {len(info)} tävlingar ({time.time() - t0:.0f} s)")
     if not matches:
         sys.exit("Ingen data – avbryter")
 
@@ -529,8 +587,21 @@ def main():
     fixtures = [f for f in fixtures if f["id"] not in played_ids and f["ko"] >= cutoff and f["lg"] in info]
     fits, priors, corner_m, card_m, fh_share = {}, {}, {}, {}, {}
     ref_ord = today.toordinal()
+    # gemensam modell för alla lag i alla tävlingar: Europacuperna och cuperna knyter ihop ligorna
+    recent_all = [m for m in matches if (today - m["date"]).days <= 730]
+    gfit = M.fit(rows_for_fit(recent_all), ref_ord, {})
+    g_corner = side_model_global(matches, ref_ord, "hc", "ac")
+    g_card = side_model_global([dict(m, hk=cards(m, "h"), ak=cards(m, "a")) for m in matches], ref_ord, "hk", "ak")
     for lg, ms in by_lg.items():
         cur = info[lg]["seasonKey"]
+        if info[lg]["kind"] == "cup":
+            fits[lg], priors[lg] = gfit, {}
+            corner_m[lg] = g_corner.get(lg)
+            card_m[lg] = g_card.get(lg)
+            ht = [m for m in ms if m.get("hthg") is not None and (today - m["date"]).days <= 730]
+            g = sum(m["hg"] + m["ag"] for m in ht)
+            fh_share[lg] = (sum(m["hthg"] + m["htag"] for m in ht) / g) if ht and g else None
+            continue
         recent = [m for m in ms if (today - m["date"]).days <= 730]
         teams = {m["hid"] for m in recent} | {m["aid"] for m in recent}
         teams |= {f["hid"] for f in fixtures if f["lg"] == lg} | {f["aid"] for f in fixtures if f["lg"] == lg}
@@ -567,10 +638,10 @@ def main():
     for it in fx_items:
         f = it["f"]
         lg = f["lg"]
-        fit = fits.get(lg)
+        fit = fits.get(lg) or gfit
         if fit is None:
             continue
-        lam_m = fit.lambdas(f["hid"], f["aid"], priors[lg])
+        lam_m = fit.lambdas(f["hid"], f["aid"], priors.get(lg, {}), neutral=bool(f.get("neutral")))
         lam_k = it["mk"]
         lam = M.blend(lam_m, lam_k, alpha) if lam_k else lam_m
         p, cs, mat = M.goal_markets(lam[0], lam[1], fh_share.get(lg))
@@ -583,6 +654,10 @@ def main():
         if "ou25" in o:
             odds["O2.5"] = [r(o["ou25"][s][0], 2) if s in o["ou25"] else None for s in srcs]
             odds["U2.5"] = [r(o["ou25"][s][1], 2) if s in o["ou25"] else None for s in srcs]
+        if "ou_other" in o and o["ou_other"]["line"] in M.LINES:
+            L = o["ou_other"]["line"]
+            odds[f"O{L}"] = [r(o["ou_other"]["odds"][0], 2)] * 3
+            odds[f"U{L}"] = [r(o["ou_other"]["odds"][1], 2)] * 3
         ah = None
         if "ah" in o and "ah_line" in o:
             line = o["ah_line"]
@@ -623,7 +698,7 @@ def main():
             "lam": [r(lam[0]), r(lam[1])], "lamM": [r(lam_m[0]), r(lam_m[1])],
             "lamK": [r(lam_k[0]), r(lam_k[1])] if lam_k else None,
             "p": {k: r(v, 4) for k, v in p.items()}, "cs": cs, "odds": odds, "ah": ah,
-            "corners": corners, "cards": cardd,
+            "corners": corners, "cards": cardd, "oddsProvider": f.get("oddsProvider"), "neutral": bool(f.get("neutral")),
         })
     print(f"  {len(out_fx)} kommande matcher med prognos")
 
@@ -635,8 +710,10 @@ def main():
     names, countries = {}, {}
     for m in matches + fixtures:
         names[m["hid"]], names[m["aid"]] = m["home"], m["away"]
-        c = info[m["lg"]]["country"] if m["lg"] in info else None
-        countries[m["hid"]] = countries[m["aid"]] = c
+        if m["lg"] in info and (info[m["lg"]]["kind"] != "cup" or m["hid"] not in countries):
+            countries[m["hid"]] = info[m["lg"]]["country"]
+        if m["lg"] in info and (info[m["lg"]]["kind"] != "cup" or m["aid"] not in countries):
+            countries[m["aid"]] = info[m["lg"]]["country"]
     next_fx = defaultdict(list)
     for f in out_fx:
         next_fx[f["hid"]].append(f["id"])
@@ -644,7 +721,15 @@ def main():
 
     teams = {}
     tables = {}
-    for lg, li in info.items():
+    # tävlingar per lag denna säsong (liga + cuper), ligorna först
+    comps = defaultdict(list)
+    for t, rows in per_team.items():
+        for x in sorted(rows, key=lambda x: (info[x["lg"]]["kind"] == "cup", x["date"])):
+            if x["season"] == info[x["lg"]]["seasonKey"] and x["lg"] not in comps[t]:
+                comps[t].append(x["lg"])
+    # ligorna först så att lagets huvudsida blir ligan, cuperna lägger bara till lag som saknas
+    for lg, li in sorted(info.items(), key=lambda kv: kv[1]["kind"] == "cup"):
+        cup = li["kind"] == "cup"
         cur = li["seasonKey"]
         lteams = sorted({m["hid"] for m in by_lg[lg] if m["season"] == cur} | {m["aid"] for m in by_lg[lg] if m["season"] == cur})
         fit = fits.get(lg)
@@ -661,16 +746,20 @@ def main():
                 continue
             a_all = agg(rows)
             rt = ratings.get(t)
-            teams[t] = {
-                "id": t, "name": names[t], "country": countries.get(t), "lg": lg,
-                "all": a_all, "home": agg([x for x in rows if x["v"] == "H"]), "away": agg([x for x in rows if x["v"] == "B"]),
-                "last6": agg(rows[-6:]),
-                "form": [[x["date"].isoformat(), x["v"], x["opp"], x["oppId"], x["gf"], x["ga"], res_letter(x)] for x in rows[-6:]],
-                "streaks": streaks(rows),
-                "rating": {"att": r(rt[0], 2), "def": r(rt[1], 2), "net": r(rt[0] - rt[1], 2),
-                           "rank": order.index(t) + 1, "of": len(order)} if rt else None,
-                "next": next_fx.get(t, []),
-            }
+            if cup and t in teams:
+                teams[t]["next"] = next_fx.get(t, [])
+            else:
+                teams[t] = {
+                    "id": t, "name": names[t], "country": countries.get(t), "lg": lg,
+                    "all": a_all, "home": agg([x for x in rows if x["v"] == "H"]), "away": agg([x for x in rows if x["v"] == "B"]),
+                    "last6": agg(rows[-6:]),
+                    "form": [[x["date"].isoformat(), x["v"], x["opp"], x["oppId"], x["gf"], x["ga"], res_letter(x)] for x in rows[-6:]],
+                    "streaks": streaks(rows),
+                    "rating": {"att": r(rt[0], 2), "def": r(rt[1], 2), "net": r(rt[0] - rt[1], 2),
+                               "rank": order.index(t) + 1, "of": len(order)} if rt else None,
+                    "next": next_fx.get(t, []),
+                }
+            teams[t]["comps"] = comps.get(t, [lg])
             table.append({"id": t, "name": names[t], "p": a_all["n"], "w": a_all["w"], "d": a_all["d"], "l": a_all["l"],
                           "gf": a_all["gfT"], "ga": a_all["gaT"], "pts": a_all["pts"],
                           "xgf": r(sum(x["xgf"] for x in rows if x["xgf"] is not None), 1) if li["hasXg"] else None,
@@ -678,9 +767,11 @@ def main():
                           "form": "".join(res_letter(x) for x in rows[-5:]),
                           "net": r(rt[0] - rt[1], 2) if rt else None})
         table.sort(key=lambda x: (-x["pts"], -(x["gf"] - x["ga"]), -x["gf"], x["name"]))
+        if cup and li["country"] != "Europa":
+            table = []  # utslagsturneringar har ingen tabell
         for i, row in enumerate(table):
             row["pos"] = i + 1
-            if row["id"] in teams:
+            if row["id"] in teams and teams[row["id"]]["lg"] == lg:
                 teams[row["id"]]["pos"] = i + 1
                 teams[row["id"]]["of"] = len(table)
         tables[lg] = table
@@ -749,7 +840,7 @@ def main():
     # ------------------------------------------------ matchfiler per liga
     # Kompakt: lagen som index i en lista, matchens id räknas fram i webbläsaren.
     cols = ["date", "season", "h", "a", "hg", "ag", "hthg", "htag", "hs", "as", "hst", "ast",
-            "hc", "ac", "hy", "ay", "hr", "ar", "hf", "af", "hxg", "axg", "ref", "oH", "oD", "oA", "oO", "oU"]
+            "hc", "ac", "hy", "ay", "hr", "ar", "hf", "af", "hxg", "axg", "ref", "oH", "oD", "oA", "oO", "oU", "hpos", "apos"]
 
     def compact(v):
         return int(v) if isinstance(v, float) and v.is_integer() else v
@@ -789,7 +880,9 @@ def main():
     meta = {
         "updated": now.strftime("%Y-%m-%dT%H:%MZ"), "alpha": alpha, "nMatches": len(matches), "nFixtures": len(out_fx),
         "nTeams": len(teams), "nRefs": len(refs), "source": "football-data.co.uk",
-        "order": list(info),
+        "order": ([c for c in ("CL", "EL", "ECL") if c in info]
+                  + [c for c in info if info[c]["kind"] != "cup" and c not in ("CL", "EL", "ECL")]
+                  + [c for c in info if info[c]["kind"] == "cup" and c not in ("CL", "EL", "ECL")]),
     }
     dump(OUT / "meta.json", meta)
     size = sum(p.stat().st_size for p in OUT.rglob("*.json"))

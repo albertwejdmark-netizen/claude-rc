@@ -71,7 +71,7 @@ cd site && python -m http.server 8000   # öppna http://localhost:8000
 
 # Matchlabbet (fotboll)
 
-`site/fotboll/` är en hemsida som analyserar alla matcher i 32 europeiska fotbollsligor: chanser och rättvisa odds för alla vanliga spel, lag- och domarstatistik, spelförslag och en lappbyggare. Den publiceras på samma GitHub Pages-sida under `/fotboll/` (länk finns uppe till höger på aktiesidan).
+`site/fotboll/` är en hemsida som analyserar alla matcher i 33 europeiska fotbollsligor, Champions League, Europa League, Conference League och sex nationella cuper: chanser och rättvisa odds för alla vanliga spel, lag- och domarstatistik, spelförslag och en lappbyggare. Den publiceras på samma GitHub Pages-sida under `/fotboll/` (länk finns uppe till höger på aktiesidan).
 
 ## Vyer
 | Vy | Innehåll |
@@ -82,7 +82,7 @@ cd site && python -m http.server 8000   # öppna http://localhost:8000
 | **Lappar** | Bygg en lapp, skriv in ditt spelbolags odds och se totalodds, verklig chans och förväntat värde. Lappgeneratorn föreslår tre lappar efter strategi. Sparade lappar rättas automatiskt. |
 | **Lag** | Sorterbar tabell över alla lag (översikt, mål, hörnor och kort, resultat om man spelat varje match) med uppdelning alla/hemma/borta/senaste 6. Lagsidor med all statistik, sviter och matchlista. |
 | **Domare** | Kort per match, kortfaktor mot ligasnittet, över 3,5/4,5 kort, fouls, mål och hemmavinster, plus kommande uppdrag. |
-| **Ligor** | Tabell, ligasnitt och topplistor. |
+| **Ligor** | Europacuper, ligor och cuper: tabell, snitt, senaste resultat (med hörnor, kort, skott och bollinnehav) och topplistor. |
 | **Modell** | Hur chanserna räknas och hur de har träffat i backtestet. |
 
 ## Så räknas chanserna
@@ -90,6 +90,7 @@ cd site && python -m http.server 8000   # öppna http://localhost:8000
 2. **Marknaden:** snittoddsen för 1X2 och över/under 2,5 räknas om till förväntade mål utan spelbolagens marginal.
 3. **Kombination:** vikten mellan modell och marknad väljs i backtestet på förra säsongen och kontrolleras på den nuvarande. Hittills har oddsen träffat bättre än statistikmodellen ensam (log-loss 1,005 mot 1,025), så vikten för modellen är 0 och chanserna för mål och resultat bygger på marknaden. Modellens egen bedömning visas ändå på matchsidan.
 4. **Hörnor och kort:** lagens snitt för och emot i förhållande till ligasnittet, negativ binomialfördelning. Korten justeras med domarens kortfaktor.
+5. **Cuper:** en gemensam modell över alla lag i alla tävlingar. Europacupmatcherna och cupmatcherna mellan divisioner knyter ihop ligorna, så lag från olika länder går att jämföra. Hörnor och kort räknas på samma sätt, där varje match jämförs med sin egen tävlings snitt.
 
 **Värde** = chans × odds − 1. Spel som saknar odds i datan (t.ex. båda gör mål, hörnor, kort) visar ett uppskattat odds med ≈; jämför rättvist odds med ditt spelbolag.
 
@@ -97,6 +98,8 @@ Backtestet (`scripts/fotboll/build.py`) skattar om modellen varje vecka på matc
 
 ## Data
 - [football-data.co.uk](https://www.football-data.co.uk): resultat, halvtid, skott, hörnor, kort, fouls, xG, domare (England och Skottland) och odds för 22 huvudligor (tre säsonger), resultat och stängningsodds för 10 extra ligor, samt kommande matcher med odds.
+- ESPN:s öppna API (`scripts/fotboll/espn.py`): Champions League, Europa League, Conference League, FA-cupen, Ligacupen, Copa del Rey, DFB-Pokal, Coppa Italia, Coupe de France och Eerste Divisie; hörnor, kort, skott, fouls och halvtid för Sverige, Norge, Danmark, Österrike och Ryssland; bollinnehav; spelschemat en vecka framåt med odds från DraftKings. Lagen paras ihop med football-data genom att jämföra matcher samma dag med samma resultat.
+- Schweiz, Polen, Rumänien, Finland och Irland har bara resultat och odds, eftersom ingen gratis källa har mer.
 - GitHub Actions bygger datan varje morgon och tisdag/fredag eftermiddag (nya odds) i samma arbetsflöde som aktiesidan.
 
 Lokalt:
