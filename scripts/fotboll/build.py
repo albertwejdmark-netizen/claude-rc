@@ -316,6 +316,123 @@ def league_roi(cands, info, thr=0.05):
     return [{"lg": lg, "n": n, "roi": r(pr / n)} for lg, (n, pr) in sorted(acc.items()) if n]
 
 
+# ---------------------------------------------------------------- lappstrategier
+
+SLIP_BOOKS = {"b365": "Bet365", "bw": "bwin", "max": "Bästa odds"}
+VALUE_THR = 0.02  # minsta värde för ett värdespel
+
+
+def _round_key(d):
+    """Omgång: helg (fredag–måndag) eller vecka (tisdag–torsdag)."""
+    wd = d.weekday()
+    if wd in (4, 5, 6):
+        return d - timedelta(days=wd - 4)
+    if wd == 0:
+        return d - timedelta(days=3)
+    return d - timedelta(days=wd - 1)
+
+
+def _slip_legs(m, book):
+    """Spel för en match med ett spelbolags odds: (p, odds, vann, stängningsvärde).
+    p = marknadens chans utan marginal (snittodds), som sidan använder."""
+    o, oc = m["odds"], m.get("odds_c") or {}
+    out = []
+    res = outcome(m)
+    if "avg" in o.get("1x2", {}) and book in o.get("1x2", {}):
+        p, pc = M.devig(o["1x2"]["avg"]), (M.devig(oc["1x2"]["avg"]) if "avg" in oc.get("1x2", {}) else None)
+        for k in range(3):
+            od = o["1x2"][book][k]
+            out.append((p[k], od, res == k, od * pc[k] - 1 if pc else None))
+    if "avg" in o.get("ou25", {}) and book in o.get("ou25", {}):
+        p, pc = M.devig(o["ou25"]["avg"]), (M.devig(oc["ou25"]["avg"]) if "avg" in oc.get("ou25", {}) else None)
+        over = m["hg"] + m["ag"] > 2.5
+        for k in range(2):
+            od = o["ou25"][book][k]
+            out.append((p[k], od, over if k == 0 else not over, od * pc[k] - 1 if pc else None))
+    return out
+
+
+def slip_backtest(by_lg, info):
+    """Hur olika lappstrategier hade gått i huvudligorna, med odds från ETT spelbolag
+    (en lapp läggs hos ett bolag). Spelen tas med oddsen före matchen; stängningsvärdet
+    jämför dem med marknadens rättvisa pris vid avspark."""
+    rows = []
+    for lg, ms in by_lg.items():
+        if info[lg]["kind"] != "main" or info[lg].get("source") == "espn":
+            continue
+        rows += [m for m in ms if m.get("odds_kind") == "pre" and m["season"] in info[lg]["seasons"][:2]]
+    if not rows:
+        return []
+    cur = {info[m["lg"]]["seasons"][0] for m in rows}
+
+    def summarize(name, desc, book, slips, legs_used):
+        out = {"namn": name, "beskrivning": desc, "bolag": SLIP_BOOKS[book], "perioder": []}
+        for per, sel in (("Förra säsongen", lambda s: s not in cur), ("Nuvarande säsong", lambda s: s in cur)):
+            ss = [x for x in slips if sel(x[2])]
+            lg_ = [x for x in legs_used if sel(x[1])]
+            clv = [c for c, _ in lg_ if c is not None]
+            if not ss:
+                out["perioder"].append({"namn": per, "n": 0})
+                continue
+            out["perioder"].append({
+                "namn": per, "n": len(ss), "traff": r(sum(1 for o, w, _ in ss if w) / len(ss)),
+                "roi": r(sum((o - 1) if w else -1 for o, w, _ in ss) / len(ss)),
+                "snittodds": r(sum(o for o, _, _ in ss) / len(ss), 2),
+                "clv": r(sum(clv) / len(clv)) if clv else None,
+                "slogStangning": r(sum(1 for c in clv if c > 0) / len(clv)) if clv else None,
+            })
+        return out
+
+    result = []
+    for book in ("b365", "bw", "max"):
+        singles, legs_used = [], []
+        rounds = defaultdict(list)
+        for m in rows:
+            for p, od, won, clv in _slip_legs(m, book):
+                e = p * od - 1
+                if e > VALUE_THR and od <= VALUE_MAX_ODDS:
+                    singles.append((od, won, m["season"]))
+                    legs_used.append((clv, m["season"]))
+                    rounds[_round_key(m["date"])].append((e, m["id"], od, won, clv, m["season"]))
+        result.append(summarize("Värdesinglar", f"Alla spel med minst {round(VALUE_THR * 100)} % värde och odds upp till {VALUE_MAX_ODDS:g}, ett i taget.", book, singles, legs_used))
+        if book == "max":
+            continue  # bästa odds finns hos olika bolag och går inte att kombinera på en lapp
+        for k, name in ((2, "Värdedubbel"), (3, "Värdetrippel")):
+            slips, lu = [], []
+            for rk, ls in rounds.items():
+                pick, used = [], set()
+                for e, mid, od, won, clv, season in sorted(ls, reverse=True):
+                    if mid not in used:
+                        used.add(mid)
+                        pick.append((od, won, clv, season))
+                    if len(pick) == k:
+                        break
+                if len(pick) == k:
+                    slips.append((math.prod(x[0] for x in pick), all(x[1] for x in pick), pick[0][3]))
+                    lu += [(x[2], x[3]) for x in pick]
+            result.append(summarize(name, f"De {k} spel med högst värde i varje omgång (helg eller vecka), olika matcher.", book, slips, lu))
+    for k, name in ((2, "Säker dubbel"), (3, "Säker trippel")):
+        rounds = defaultdict(list)
+        for m in rows:
+            for p, od, won, clv in _slip_legs(m, "b365"):
+                if od >= 1.2:
+                    rounds[_round_key(m["date"])].append((p, m["id"], od, won, clv, m["season"]))
+        slips, lu = [], []
+        for rk, ls in rounds.items():
+            pick, used = [], set()
+            for p, mid, od, won, clv, season in sorted(ls, reverse=True):
+                if mid not in used:
+                    used.add(mid)
+                    pick.append((od, won, clv, season))
+                if len(pick) == k:
+                    break
+            if len(pick) == k:
+                slips.append((math.prod(x[0] for x in pick), all(x[1] for x in pick), pick[0][3]))
+                lu += [(x[2], x[3]) for x in pick]
+        result.append(summarize(name, f"De {k} spel med högst chans i varje omgång (odds minst 1,20).", "b365", slips, lu))
+    return result
+
+
 def run_backtest(by_lg, info, prior_fn):
     t0 = time.time()
     recs = backtest(by_lg, info, prior_fn)
@@ -341,6 +458,7 @@ def run_backtest(by_lg, info, prior_fn):
     return {
         "alpha": alpha, "grid": [{"alpha": a, "ll1x2": r(l, 4), "llou": r(o, 4)} for a, l, o in grid],
         "perioder": periods, "endastModell": model_only,
+        "lappar": slip_backtest(by_lg, info),
     }
 
 
@@ -647,7 +765,7 @@ def main():
         p, cs, mat = M.goal_markets(lam[0], lam[1], fh_share.get(lg))
         odds = {}
         o = f["odds"]
-        srcs = ("avg", "max", "b365")
+        srcs = ("avg", "max", "b365", "bw")  # samma ordning som SRC i app.js
         if "1x2" in o:
             for k, key in enumerate(("1", "X", "2")):
                 odds[key] = [r(o["1x2"][s][k], 2) if s in o["1x2"] else None for s in srcs]
@@ -656,8 +774,8 @@ def main():
             odds["U2.5"] = [r(o["ou25"][s][1], 2) if s in o["ou25"] else None for s in srcs]
         if "ou_other" in o and o["ou_other"]["line"] in M.LINES:
             L = o["ou_other"]["line"]
-            odds[f"O{L}"] = [r(o["ou_other"]["odds"][0], 2)] * 3
-            odds[f"U{L}"] = [r(o["ou_other"]["odds"][1], 2)] * 3
+            odds[f"O{L}"] = [r(o["ou_other"]["odds"][0], 2)] * 2 + [None, None]  # snitt/bästa = enda bolaget
+            odds[f"U{L}"] = [r(o["ou_other"]["odds"][1], 2)] * 2 + [None, None]
         ah = None
         if "ah" in o and "ah_line" in o:
             line = o["ah_line"]
@@ -840,7 +958,8 @@ def main():
     # ------------------------------------------------ matchfiler per liga
     # Kompakt: lagen som index i en lista, matchens id räknas fram i webbläsaren.
     cols = ["date", "season", "h", "a", "hg", "ag", "hthg", "htag", "hs", "as", "hst", "ast",
-            "hc", "ac", "hy", "ay", "hr", "ar", "hf", "af", "hxg", "axg", "ref", "oH", "oD", "oA", "oO", "oU", "hpos", "apos"]
+            "hc", "ac", "hy", "ay", "hr", "ar", "hf", "af", "hxg", "axg", "ref", "oH", "oD", "oA", "oO", "oU", "hpos", "apos",
+            "cH", "cD", "cA", "cO", "cU"]  # c* = stängningsodds (snitt), för att räkna stängningsvärde
 
     def compact(v):
         return int(v) if isinstance(v, float) and v.is_integer() else v
@@ -855,8 +974,11 @@ def main():
                     tlist.append([t, n])
             o1 = m["odds"].get("1x2", {}).get("avg") or [None] * 3
             ou = m["odds"].get("ou25", {}).get("avg") or [None] * 2
+            c1 = (m.get("odds_c") or {}).get("1x2", {}).get("avg") or [None] * 3
+            cou = (m.get("odds_c") or {}).get("ou25", {}).get("avg") or [None] * 2
             vals = {**m, "date": m["date"].isoformat(), "h": tix[m["hid"]], "a": tix[m["aid"]],
-                    "oH": o1[0], "oD": o1[1], "oA": o1[2], "oO": ou[0], "oU": ou[1]}
+                    "oH": o1[0], "oD": o1[1], "oA": o1[2], "oO": ou[0], "oU": ou[1],
+                    "cH": c1[0], "cD": c1[1], "cA": c1[2], "cO": cou[0], "cU": cou[1]}
             rows.append([compact(vals.get(c)) for c in cols])
         return {"cols": cols, "teams": tlist, "rows": rows}
 

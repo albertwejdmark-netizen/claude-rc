@@ -476,11 +476,11 @@ def integrate(matches, fixtures, info, ev, today: date, team_id, match_id, horiz
         if not o:
             continue
         f["oddsProvider"] = o["provider"]
-        f["odds"]["1x2"] = {"avg": o["1x2"], "max": o["1x2"], "b365": o["1x2"]}
+        f["odds"]["1x2"] = {"avg": o["1x2"], "max": o["1x2"]}  # ett bolag: inte Bet365/bwin
         if "ou" in o:
             line, ov, un = o["ou"]
             if line == 2.5:
-                f["odds"]["ou25"] = {"avg": [ov, un], "max": [ov, un], "b365": [ov, un]}
+                f["odds"]["ou25"] = {"avg": [ov, un], "max": [ov, un]}
             else:
                 f["odds"]["ou_other"] = {"line": line, "odds": [ov, un]}
     fixtures += new_fx

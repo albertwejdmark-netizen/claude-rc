@@ -185,7 +185,7 @@ def odds_main(row, closing=False):
     """Odds från en rad i huvudligornas filer. Returnerar dict med 1x2/ou/ah per källa."""
     c = "C" if closing else ""
     o = {}
-    for src, pre in (("avg", "Avg"), ("max", "Max"), ("b365", "B365")):
+    for src, pre in (("avg", "Avg"), ("max", "Max"), ("b365", "B365"), ("bw", "BW"), ("bfe", "BFE")):
         x = triple(row, pre + c)
         if x:
             o.setdefault("1x2", {})[src] = x

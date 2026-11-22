@@ -35,18 +35,18 @@ function store(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); retu
 function persist(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* privat läge */ } }
 
 // ------------------------------------------------------------------ tillstånd
-const SRC = { avg: 0, max: 1, b365: 2 };
-const SRC_NAME = { avg: 'snittodds', max: 'bästa odds', b365: 'Bet365' };
+const SRC = { avg: 0, max: 1, b365: 2, bw: 3 }; // samma ordning som oddslistorna i fixtures.json
+const SRC_NAME = { avg: 'snittodds', max: 'bästa odds', b365: 'Bet365', bw: 'bwin' };
 const S = {
   meta: null, fx: [], fxById: {}, teams: {}, leagues: {}, refs: {}, bt: null, files: {},
-  set: Object.assign({ odds: 'max' }, store('ml-settings', {})),
+  set: Object.assign({ odds: 'max', bank: 1000 }, store('ml-settings', {})),
   slip: store('ml-slip', []), saved: store('ml-saved', []),
   ui: {
     day: 'all', lg: 'all', q: '', onlyValue: false,
     spel: { preset: 'varde', group: 'all', minP: 0.15, minO: 1.2, maxO: 5, minE: 0.03, real: true, day: 'all', lg: 'all', sort: 'e', asc: false },
     lag: { lg: 'all', set: 'oversikt', split: 'all', q: '', sort: 'ppg', asc: false },
     dom: { lg: 'all', minN: 5, sort: 'k', asc: false },
-    gen: { n: 3, strat: 'chans', minO: 1.2, maxO: 2.5, days: 'all', est: false, out: null },
+    gen: { n: 2, strat: 'varde', book: 'b365', minE: 0.02, minO: 1.2, maxO: 2.5, days: 'all', est: false, out: null, singles: [] },
     bt: { odds: 'max', grp: 'Alla', per: 1, cap: true },
     cmp: 'venue', stake: 100,
   },
@@ -133,9 +133,10 @@ function label(key, f) {
 function ahTxt(l) { if (l == null) return ''; return (l > 0 ? '+' : l < 0 ? '−' : '') + comma(Math.abs(l)); }
 
 /** Odds för ett spel med vald oddskälla. kind: real (från spelbolagen), calc (räknat från 1X2), est (uppskattat). */
-function oddsOf(f, key) {
-  const i = SRC[S.set.odds];
-  const pick = arr => arr ? (arr[i] ?? arr[0]) : null;
+function oddsOf(f, key, src = S.set.odds) {
+  const i = SRC[src];
+  // bara "bästa odds" får falla tillbaka på snittet; ett spelbolags odds får aldrig låtsas finnas
+  const pick = arr => arr ? (arr[i] ?? (src === 'max' ? arr[0] : null)) : null;
   if (f.odds?.[key]) { const o = pick(f.odds[key]); if (o) return { o, kind: 'real' }; }
   if (['1X', '12', 'X2'].includes(key) && f.odds?.['1']) {
     // dubbelchans räknas från snittodds: bästa odds från olika spelbolag går inte att kombinera
@@ -165,7 +166,7 @@ function picks(f) {
     for (const side of ['H', 'A']) {
       const s = f.ah[side];
       if (!s) continue;
-      const o = s.odds[i] ?? s.odds[0], e = s.ev[i] ?? s.ev[0];
+      const o = s.odds[i] ?? (S.set.odds === 'max' ? s.odds[0] : null), e = s.ev[i] ?? (S.set.odds === 'max' ? s.ev[0] : null);
       if (o) out.push({ f, key: 'AH:' + side, group: 'Asiatiskt handikapp', p: s.pwin, fair: null, o, kind: 'real', e, ah: true });
     }
   }
@@ -238,13 +239,13 @@ function dc(lh, la, rho = -0.06) {
 
 // ------------------------------------------------------------------ lappen
 function inSlip(fid, key) { return S.slip.some(l => l.fid === fid && l.key === key); }
-function toggleSlip(fid, key) {
+function toggleSlip(fid, key, src = S.set.odds) {
   const i = S.slip.findIndex(l => l.fid === fid && l.key === key);
   if (i >= 0) S.slip.splice(i, 1);
   else {
     const f = S.fxById[fid];
     if (!f) return;
-    const od = oddsOf(f, key);
+    const od = oddsOf(f, key, src);
     S.slip.push({ fid, key, lg: f.lg, home: f.home, away: f.away, ko: f.ko, p: f.p[key], o: od ? +od.o.toFixed(2) : +(1 / f.p[key]).toFixed(2), kind: od?.kind || 'est', label: label(key, f) });
   }
   persist('ml-slip', S.slip);
@@ -256,8 +257,8 @@ function updateSlipCount() {
   b.hidden = !S.slip.length;
   b.textContent = S.slip.length;
 }
-const addBtn = (fid, key) => key.startsWith('AH:') ? '' :
-  `<button class="addbtn ${inSlip(fid, key) ? 'on' : ''}" data-add="${esc(fid)}|${esc(key)}" title="Lägg till på lappen" aria-label="Lägg till på lappen">${inSlip(fid, key) ? '✓' : '+'}</button>`;
+const addBtn = (fid, key, src = '') => key.startsWith('AH:') ? '' :
+  `<button class="addbtn ${inSlip(fid, key) ? 'on' : ''}" data-add="${esc(fid)}|${esc(key)}" data-src="${src}" title="Lägg till på lappen" aria-label="Lägg till på lappen">${inSlip(fid, key) ? '✓' : '+'}</button>`;
 
 // ------------------------------------------------------------------ små byggstenar
 const formChips = letters => `<span class="form">${[...letters].map(x => `<span class="f ${x}" title="${x === 'V' ? 'Vinst' : x === 'O' ? 'Oavgjort' : 'Förlust'}">${x}</span>`).join('')}</span>`;
@@ -544,21 +545,35 @@ function viewSpel() {
     </div>
     <div class="small muted">${total} spel${total > 250 ? ', visar de 250 första' : ''}. Odds: ${SRC_NAME[S.set.odds]} (byt i menyn).</div>
     ${rows.length ? `<div class="tablewrap"><table data-table="spel"><thead><tr>
-      ${th('ko', 'Avspark', u)}${th('m', 'Match', u)}<th>Spel</th>${th('p', 'Chans', u, 'num')}${th('fair', 'Rättvist', u, 'num', '1 delat med chansen')}${th('o', 'Odds', u, 'num')}${th('e', 'Värde', u, 'num', 'Chans × odds − 1')}<th></th>
+      ${th('ko', 'Avspark', u)}${th('m', 'Match', u)}<th>Spel</th>${th('p', 'Chans', u, 'num')}${th('fair', 'Rättvist', u, 'num', '1 delat med chansen')}${th('o', 'Odds', u, 'num')}${th('e', 'Värde', u, 'num', 'Chans × odds − 1')}${u.preset === 'varde' ? '<th class="num" title="¼ Kelly av din spelkassa (ställs in under Lappar)">Insats</th>' : ''}<th></th>
     </tr></thead><tbody>${rows.map(x => `<tr>
       <td class="faint">${dayChip(dayKey(x.f.ko))} ${hm(x.f.ko)}</td>
       <td><a href="#match-${esc(x.f.id)}">${esc(x.f.home)} – ${esc(x.f.away)}</a><div class="small faint">${esc(lgName(x.f.lg))}</div></td>
       <td class="wrap">${esc(label(x.key, x.f))}</td>
       <td class="num">${pct(x.p)}</td><td class="num">${x.fair ? dec(x.fair) : '–'}</td><td class="num">${oddsCell(x)}</td><td class="num">${edgeCell(x.e, x.kind)}</td>
+      ${u.preset === 'varde' ? `<td class="num">${x.kind === 'real' ? kellyStake(x.p, x.o) + ' kr' : '–'}</td>` : ''}
       <td>${addBtn(x.f.id, x.key)}</td></tr>`).join('')}</tbody></table></div>`
     : `<div class="panel">Inga spel matchar filtret.${u.preset === 'varde' && S.set.odds !== 'max' ? ' Med snittodds finns nästan aldrig värde eftersom spelbolagens marginal redan är inräknad. Välj <button class="link" data-odds="max">bästa odds</button> för att se var enskilda spelbolag ligger över marknaden.' : ''}</div>`}
   </div>`;
 }
 
 // ------------------------------------------------------------------ vy: lappar
+const KELLY = 0.25, KELLY_CAP = 0.03; // kvarts-Kelly, högst 3 % av kassan per lapp
+const BOOKS = { b365: 'Bet365', bw: 'bwin', max: 'Bästa odds (bara singlar)' };
+
+/** Föreslagen insats (kr) efter spelkassa och värde. 0 om spelet saknar värde. */
+function kellyStake(p, o) {
+  if (!p || !o || o <= 1) return 0;
+  const e = p * o - 1;
+  if (e <= 0) return 0;
+  const frac = Math.min(KELLY_CAP, KELLY * e / (o - 1));
+  const kr = S.set.bank * frac;
+  return kr < 5 ? 0 : Math.round(kr / 5) * 5;
+}
+
 const STRATS = {
-  chans: { label: 'Högst chans', keys: ['1', '2', '1X', 'X2', 'O2.5', 'U2.5'], score: x => x.p },
-  varde: { label: 'Bäst värde', keys: ['1', 'X', '2', 'O2.5', 'U2.5'], score: x => x.p >= 0.25 ? x.e : null },
+  varde: { label: 'Värdelapp (rekommenderas)', keys: ['1', 'X', '2', 'O2.5', 'U2.5'], value: true },
+  chans: { label: 'Högst chans (förlorar i längden)', keys: ['1', '2', '1X', 'X2', 'O2.5', 'U2.5'], score: x => x.p },
   mal: { label: 'Mål', keys: ['O1.5', 'O2.5', 'BTTS:J', 'H:O0.5', 'A:O0.5', 'FH:O0.5', 'H:O1.5', 'A:O1.5'], score: x => x.p },
   horn: { label: 'Hörnor och kort', keys: [...CORNER_LINES.flatMap(l => ['C:O' + l, 'C:U' + l]), ...CARD_LINES.flatMap(l => ['K:O' + l, 'K:U' + l])], score: x => x.p, est: true },
 };
@@ -575,24 +590,33 @@ function generate() {
     for (const key of st.keys) {
       const p = f.p[key];
       if (p == null) continue;
-      const od = oddsOf(f, key);
-      if (!od || (od.kind === 'est' && !g.est && !st.est)) continue;
-      if (od.o < g.minO || od.o > g.maxO) continue;
+      const od = oddsOf(f, key, g.book);
+      if (!od) continue;
       const x = { f, key, p, o: od.o, kind: od.kind, e: p * od.o - 1 };
-      x.s = st.score(x);
+      if (st.value) {
+        // värde: bara riktiga odds hos det valda bolaget, minst 2 % värde, inga långa odds
+        if (od.kind !== 'real' || x.e < g.minE || od.o > VALUE_MAX_ODDS || p < 0.2) continue;
+        x.s = x.e;
+      } else {
+        if (od.kind === 'est' && !g.est && !st.est) continue;
+        if (od.o < g.minO || od.o > g.maxO) continue;
+        x.s = st.score(x);
+      }
       if (x.s != null) cands.push(x);
     }
   }
   cands.sort((a, b) => b.s - a.s);
+  g.singles = st.value ? cands.map(c => ({ fid: c.f.id, key: c.key })) : [];
   const usedFx = new Set(), slips = [];
-  for (let s = 0; s < 3; s++) {
+  // bästa odds finns hos olika spelbolag och går inte att kombinera på en lapp
+  for (let s = 0; s < (g.book === 'max' && st.value ? 0 : 3); s++) {
     const legs = [], fxs = new Set();
     for (const c of cands) {
       if (usedFx.has(c.f.id) || fxs.has(c.f.id)) continue;
       legs.push(c); fxs.add(c.f.id);
       if (legs.length >= g.n) break;
     }
-    if (legs.length < g.n) break;
+    if (legs.length < (st.value ? 2 : g.n)) break;
     legs.forEach(c => usedFx.add(c.f.id));
     slips.push(legs);
   }
@@ -606,12 +630,24 @@ function slipStats(legs) {
   return { odds, prob, ev: prob * odds - 1, same };
 }
 
+function strategyTable(compact = false) {
+  const rows = S.bt?.lappar || [];
+  if (!rows.length) return '';
+  const cell = p => p && p.n ? `<td class="num">${p.n}</td><td class="num"><b class="${p.roi > 0 ? 'good' : 'bad'}">${sgn(p.roi, 0)}</b></td><td class="num">${p.clv != null ? `<span class="${p.clv > 0 ? 'good' : 'bad'}">${sgn(p.clv, 1)}</span>` : '–'}</td><td class="num">${pct(p.slogStangning)}</td>`
+    : '<td class="num">0</td><td class="num">–</td><td class="num">–</td><td class="num">–</td>';
+  const list = compact ? rows.filter(r => r.bolag !== 'bwin' || r.perioder.some(p => p.n >= 5)) : rows;
+  return `<div class="tablewrap"><table><thead><tr><th>Strategi</th><th>Odds</th><th class="num">Lappar</th><th class="num">Resultat</th><th class="num" title="Oddset jämfört med marknadens rättvisa pris vid avspark">Stängningsvärde</th><th class="num">Slog stängning</th><th class="num">Lappar</th><th class="num">Resultat</th><th class="num">Stängningsvärde</th><th class="num">Slog stängning</th></tr>
+    <tr><th></th><th></th><th colspan="4" class="num">${esc(rows[0].perioder[0].namn)}</th><th colspan="4" class="num">${esc(rows[0].perioder[1].namn)}</th></tr></thead>
+    <tbody>${list.map(r => `<tr><td title="${esc(r.beskrivning)}">${esc(r.namn)}</td><td class="small muted">${esc(r.bolag)}</td>${cell(r.perioder[0])}${cell(r.perioder[1])}</tr>`).join('')}</tbody></table></div>`;
+}
+
 function viewLappar() {
   const g = S.ui.gen;
   if (!g.out) generate();
   const legs = S.slip;
   const st = slipStats(legs);
   const stake = S.ui.stake;
+  const kelly = kellyStake(st.prob, st.odds);
   const slipHtml = legs.length ? `${legs.map((l, i) => `<div class="slip-leg">
       <div class="what"><b>${esc(l.label)}</b><span>${esc(l.home)} – ${esc(l.away)} · ${dayChip(dayKey(l.ko))} ${hm(l.ko)}</span></div>
       <div class="num"><div class="small muted">chans</div>${pct(l.p)}</div>
@@ -621,39 +657,70 @@ function viewLappar() {
         ${tile('Totalodds', dec(st.odds))}
         ${tile('Chans att vinna', pct(st.prob, 1), st.same ? 'två spel på samma match – chansen är osäker' : '')}
         ${tile('Förväntat värde', `<span class="${st.ev > 0 ? 'good' : 'bad'}">${sgn(st.ev, 0)}</span>`, st.ev > 0 ? 'lönsam i längden om chanserna stämmer' : 'förlust i längden')}
-        <div class="tile"><label class="k" for="stake">Insats (kr)</label><input type="number" id="stake" value="${stake}" min="1" step="10" style="width:100%;margin-top:4px"></div>
+        ${tile('Föreslagen insats', `${kelly} kr`, kelly ? `¼ Kelly av ${S.set.bank.toLocaleString('sv-SE')} kr` : 'inget värde – spela inte')}
+        <div class="tile"><label class="k" for="stake">Din insats (kr)</label><input type="number" id="stake" value="${stake}" min="1" step="5" style="width:100%;margin-top:4px"></div>
         ${tile('Möjlig vinst', `${Math.round(stake * st.odds).toLocaleString('sv-SE')} kr`)}
       </div>
-      <div class="row" style="margin-top:12px"><button class="primary" id="saveSlip">Spara lappen</button><button id="clearSlip">Töm lappen</button></div>`
-    : '<p class="muted">Lappen är tom. Lägg till spel med + på <a href="#spel">Spelförslag</a> eller en matchsida, eller använd ett förslag nedan.</p>';
+      <p class="note">Skriv in ditt spelbolags odds i rutorna. Värdet räknas om direkt. Ligger det under 0 har spelbolaget sänkt oddset sedan datan hämtades.</p>
+      <div class="row" style="margin-top:8px"><button class="primary" id="saveSlip">Spara lappen</button><button id="clearSlip">Töm lappen</button></div>`
+    : '<p class="muted">Lappen är tom. Använd ett förslag nedan, eller lägg till spel med + på <a href="#spel">Spelförslag</a> eller en matchsida.</p>';
 
+  const legInfo = ({ fid, key }) => { const f = S.fxById[fid]; const od = f && oddsOf(f, key, g.book); return f && od ? { f, key, p: f.p[key], o: od.o, kind: od.kind } : null; };
   const gen = (g.out || []).map((legsKeys, i) => {
-    const ls = legsKeys.map(({ fid, key }) => { const f = S.fxById[fid]; const od = oddsOf(f, key); return { f, key, p: f.p[key], o: od.o, kind: od.kind }; });
+    const ls = legsKeys.map(legInfo).filter(Boolean);
     const s = slipStats(ls.map(l => ({ ...l, fid: l.f.id })));
-    return `<div class="panel sugg"><div class="row between"><h3>Förslag ${i + 1}</h3><button data-use="${i}">Använd</button></div>
-      <ol>${ls.map(l => `<li><b>${esc(label(l.key, l.f))}</b> <span class="muted">${pct(l.p)} · odds ${l.kind === 'real' ? dec(l.o) : `≈${dec(l.o)}`}</span><br><a class="small" href="#match-${esc(l.f.id)}">${esc(l.f.home)} – ${esc(l.f.away)}</a> <span class="small faint">${dayChip(dayKey(l.f.ko))} ${hm(l.f.ko)}</span></li>`).join('')}</ol>
-      <div class="small">Totalodds <b>${dec(s.odds)}</b> · chans <b>${pct(s.prob, 1)}</b> · värde <b class="${s.ev > 0 ? 'good' : 'bad'}">${sgn(s.ev, 0)}</b></div></div>`;
+    const k = kellyStake(s.prob, s.odds);
+    return `<div class="panel sugg"><div class="row between"><h3>${ls.length === 2 ? 'Dubbel' : ls.length === 3 ? 'Trippel' : `${ls.length} spel`} ${i + 1}</h3><button data-use="${i}">Använd</button></div>
+      <ol>${ls.map(l => `<li><b>${esc(label(l.key, l.f))}</b> <span class="muted">${pct(l.p)} · odds ${l.kind === 'real' ? dec(l.o) : `≈${dec(l.o)}`}${STRATS[g.strat].value ? ` · värde ${sgn(l.p * l.o - 1, 0)}` : ''}</span><br><a class="small" href="#match-${esc(l.f.id)}">${esc(l.f.home)} – ${esc(l.f.away)}</a> <span class="small faint">${dayChip(dayKey(l.f.ko))} ${hm(l.f.ko)}</span></li>`).join('')}</ol>
+      <div class="small">Totalodds <b>${dec(s.odds)}</b> · chans <b>${pct(s.prob, 1)}</b> · värde <b class="${s.ev > 0 ? 'good' : 'bad'}">${sgn(s.ev, 0)}</b> · insats <b>${k} kr</b></div></div>`;
   }).join('');
+  const singles = (g.singles || []).map(legInfo).filter(Boolean).slice(0, 12);
+  const isValue = STRATS[g.strat].value;
 
   return `<div class="stack">
-    <div><h1>Lappar</h1><p class="lead">Bygg en kombination och se den verkliga chansen att den går in. Chanserna multipliceras, så varje spel som läggs till sänker träffchansen och spelbolagets marginal växer.</p></div>
+    <div><h1>Lappar</h1><p class="lead">Ingen strategi kan garantera vinst. Men det finns en sak som avgör om man går plus i längden: att spela när ditt spelbolags odds är högre än det rättvisa priset. Lappgeneratorn väljer bara sådana spel, och föreslår en insats efter din spelkassa så att en dålig period inte tömmer den.</p></div>
+    <div class="controls">
+      <label class="field" for="bank">Din spelkassa (kr) <input type="number" id="bank" value="${S.set.bank}" min="100" step="100" style="width:120px"></label>
+      <span class="note">Insatserna föreslås som ¼ Kelly, högst ${Math.round(KELLY_CAP * 100)} % av kassan per lapp. Sparas bara i din webbläsare.</span>
+    </div>
     <div class="grid2">
       <div class="panel"><h2>Din lapp</h2>${slipHtml}</div>
       <div class="panel stack"><h2>Lappgenerator</h2>
         <div class="controls">
-          <label class="field" for="gN">Antal spel <select id="gN" data-k="gen.n" data-type="num">${[2, 3, 4, 5, 6, 8, 10].map(n => `<option ${g.n === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
           <label class="field" for="gS">Strategi <select id="gS" data-k="gen.strat">${Object.entries(STRATS).map(([k, s]) => `<option value="${k}" ${g.strat === k ? 'selected' : ''}>${s.label}</option>`).join('')}</select></label>
-          <label class="field" for="gMin">Odds per spel från <input type="number" id="gMin" data-k="gen.minO" step="0.05" value="${g.minO}"></label>
-          <label class="field" for="gMax">till <input type="number" id="gMax" data-k="gen.maxO" step="0.1" value="${g.maxO}"></label>
+          <label class="field" for="gB">Ditt spelbolag <select id="gB" data-k="gen.book">${Object.entries(BOOKS).map(([k, n]) => `<option value="${k}" ${g.book === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+          <label class="field" for="gN">Antal spel <select id="gN" data-k="gen.n" data-type="num">${(isValue ? [2, 3] : [2, 3, 4, 5, 6]).map(n => `<option ${g.n === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+          ${isValue ? `<label class="field" for="gE2">Minsta värde (%) <input type="number" id="gE2" data-k="gen.minE" data-scale="100" value="${Math.round(g.minE * 100)}" min="0" step="1"></label>`
+            : `<label class="field" for="gMin">Odds per spel från <input type="number" id="gMin" data-k="gen.minO" step="0.05" value="${g.minO}"></label>
+          <label class="field" for="gMax">till <input type="number" id="gMax" data-k="gen.maxO" step="0.1" value="${g.maxO}"></label>`}
           <label class="field" for="gD">Period <select id="gD" data-k="gen.days"><option value="1" ${g.days === '1' ? 'selected' : ''}>Idag</option><option value="2" ${g.days === '2' ? 'selected' : ''}>Idag och imorgon</option><option value="all" ${g.days === 'all' ? 'selected' : ''}>Alla kommande</option></select></label>
-          <label class="check" for="gE"><input type="checkbox" id="gE" data-k="gen.est" ${g.est ? 'checked' : ''}> Ta med spel utan riktiga odds</label>
+          ${isValue ? '' : `<label class="check" for="gE"><input type="checkbox" id="gE" data-k="gen.est" ${g.est ? 'checked' : ''}> Ta med spel utan riktiga odds</label>`}
         </div>
-        <p class="note">${g.strat === 'chans' ? 'Väljer de spel som oftast går in inom oddsintervallet, ett per match.' : g.strat === 'varde' ? `Väljer spel där ${SRC_NAME[S.set.odds]} ligger högst över vår bedömning (minst 25 % chans).` : g.strat === 'mal' ? 'Väljer målspel med högst chans.' : 'Hörnor och kort har inga odds i datan, oddsen är uppskattade. Kolla ditt spelbolag.'}</p>
+        <p class="note">${isValue ? `Väljer 1X2 och över/under 2,5 där ${g.book === 'max' ? 'det bästa oddset' : BOOKS[g.book] + 's odds'} är minst ${Math.round(g.minE * 100)} % över marknadens rättvisa pris (chans minst 20 %, odds högst ${VALUE_MAX_ODDS}), ett spel per match. Hela lappen läggs hos samma bolag. Har du konto hos båda: jämför och ta det bolag som ger mest värde.`
+          : g.strat === 'chans' ? 'Väljer de spel som oftast går in. Spelbolagens marginal gör att de här lapparna förlorar i längden, se tabellen nedan.'
+          : g.strat === 'mal' ? 'Väljer målspel med högst chans. Oddsen för de flesta målspel saknas i datan, så värdet går inte att räkna. Jämför rättvist odds med ditt spelbolag.'
+          : 'Hörnor och kort har inga odds i datan, oddsen är uppskattade. Kolla ditt spelbolag.'}</p>
       </div>
     </div>
-    ${gen ? `<div class="grid3">${gen}</div>` : '<div class="panel muted">Hittade inga förslag med de inställningarna. Prova ett bredare oddsintervall eller längre period.</div>'}
+    ${gen ? `<div class="grid3">${gen}</div>` : `<div class="panel muted">${isValue && g.book === 'max' ? 'Bästa odds kommer från olika spelbolag (Bet365, bwin, Betfred, BetVictor, Paddy Power, Sky Bet och Betfairs spelbörs) och kan inte kombineras på en lapp. Spela värdesinglarna nedan hos det bolag som har oddset. I backtestet var det den här strategin som slog stängningsoddset oftast.' : isValue ? `Just nu finns färre än två spel med minst ${Math.round(g.minE * 100)} % värde hos ${BOOKS[g.book]}. Det är normalt: värde finns oftast på några få spel per omgång, mest när oddsen för helgen kommer på fredagen och för veckomatcherna på tisdagen. Byt bolag, sänk minsta värde eller spela värdesinglarna nedan.` : 'Hittade inga förslag med de inställningarna. Prova ett bredare oddsintervall eller längre period.'}</div>`}
+    ${isValue ? `<div class="panel"><h2>Värdesinglar ${g.book === 'max' ? 'med bästa odds' : 'hos ' + BOOKS[g.book]}</h2><p class="note">Singlar har lägre risk än lappar: värdet är detsamma per spel, men en förlust slår inte ut hela lappen. I backtestet var det singlarna som gav jämnast resultat.</p>
+      ${singles.length ? `<div class="tablewrap" style="margin-top:8px"><table><thead><tr><th>Avspark</th><th>Match</th><th>Spel</th><th class="num">Chans</th><th class="num">Odds</th><th class="num">Värde</th><th class="num">Insats</th><th></th></tr></thead><tbody>${singles.map(l =>
+        `<tr><td class="faint">${dayChip(dayKey(l.f.ko))} ${hm(l.f.ko)}</td><td><a href="#match-${esc(l.f.id)}">${esc(l.f.home)} – ${esc(l.f.away)}</a></td><td class="wrap">${esc(label(l.key, l.f))}</td><td class="num">${pct(l.p)}</td><td class="num">${dec(l.o)}</td><td class="num">${edgeCell(l.p * l.o - 1, 'real')}</td><td class="num"><b>${kellyStake(l.p, l.o)} kr</b></td><td>${addBtn(l.f.id, l.key, g.book)}</td></tr>`).join('')}</tbody></table></div>`
+        : `<p class="muted">Inga spel med värde ${g.book === 'max' ? 'mot bästa odds' : 'hos ' + BOOKS[g.book]} just nu.</p>`}</div>` : ''}
+    <div class="panel"><h2>Din statistik</h2><div id="mystats" class="muted">Spara lappar för att se hur det går. Statistiken räknas när matcherna är spelade.</div></div>
     <div class="panel"><h2>Sparade lappar</h2><div id="saved">${savedHtml()}</div></div>
+    <div class="panel"><h2>Så har strategierna gått</h2>
+      <p class="note">Backtest i huvudligorna med oddsen före matchen hos ett och samma bolag. <b>Stängningsvärde</b> jämför oddset med marknadens rättvisa pris vid avspark. Det säger mer än vinst och förlust på några få lappar: den som i längden får bättre odds än stängningen går plus. Få lappar ger stor slump i resultatkolumnen.</p>
+      ${strategyTable(true)}
+    </div>
   </div>`;
+}
+
+function closingP(key, m) {
+  const dv = a => { if (a.some(x => !x)) return null; const s = a.reduce((t, x) => t + 1 / x, 0); return a.map(x => 1 / x / s); };
+  const p1 = m.cH ? dv([m.cH, m.cD, m.cA]) : null, pou = m.cO ? dv([m.cO, m.cU]) : null;
+  const map = { '1': p1?.[0], 'X': p1?.[1], '2': p1?.[2], '1X': p1 && p1[0] + p1[1], '12': p1 && p1[0] + p1[2], 'X2': p1 && p1[1] + p1[2], 'O2.5': pou?.[0], 'U2.5': pou?.[1] };
+  return map[key] ?? null;
 }
 
 function savedHtml(results = {}) {
@@ -661,16 +728,42 @@ function savedHtml(results = {}) {
   return S.saved.slice().reverse().map((s, ri) => {
     const i = S.saved.length - 1 - ri;
     const st = slipStats(s.legs);
-    const res = s.legs.map(l => results[l.fid + '|' + l.key]);
+    const res = s.legs.map(l => results[l.fid + '|' + l.key]?.won);
     const lost = res.some(r => r === false), won = res.every(r => r === true);
     const status = lost ? ['lost', 'Förlorad'] : won ? ['won', `Vunnen, ${Math.round(s.stake * st.odds)} kr`] : ['open', 'Öppen'];
     return `<div class="slip-leg" style="grid-template-columns:minmax(0,1fr) auto auto">
       <div class="what"><b>${s.legs.length} spel · odds ${dec(st.odds)} · ${s.stake} kr</b>
-      ${s.legs.map((l, j) => `<span>${res[j] === true ? '✓' : res[j] === false ? '✗' : '○'} ${esc(l.label)} <span class="faint">(${esc(l.home)} – ${esc(l.away)})</span></span>`).join('')}
+      ${s.legs.map((l, j) => `<span>${res[j] === true ? '✓' : res[j] === false ? '✗' : '○'} ${esc(l.label)} <span class="faint">(${esc(l.home)} – ${esc(l.away)}, odds ${dec(l.o)})</span></span>`).join('')}
       <span class="faint">Sparad ${shortDate(s.saved.slice(0, 10))}</span></div>
       <span class="status ${status[0]}">${status[1]}</span>
       <button class="addbtn" data-delsaved="${i}" title="Ta bort" aria-label="Ta bort sparad lapp">✕</button></div>`;
   }).join('');
+}
+
+function myStatsHtml(results) {
+  let n = 0, staked = 0, back = 0;
+  const clv = [];
+  for (const s of S.saved) {
+    const res = s.legs.map(l => results[l.fid + '|' + l.key]);
+    for (const r of res) if (r?.clv != null) clv.push(r.clv);
+    const lost = res.some(r => r?.won === false), won = res.every(r => r?.won === true);
+    if (!lost && !won) continue;
+    n++;
+    staked += s.stake;
+    if (won) back += s.stake * slipStats(s.legs).odds;
+  }
+  if (!n && !clv.length) return '<p class="muted">Inga avgjorda lappar än.</p>';
+  const net = back - staked;
+  const beat = clv.length ? clv.filter(c => c > 0).length / clv.length : null;
+  const avg = clv.length ? clv.reduce((a, b) => a + b, 0) / clv.length : null;
+  return `<div class="tiles">
+    ${tile('Avgjorda lappar', n)}
+    ${tile('Insatt', `${Math.round(staked).toLocaleString('sv-SE')} kr`)}
+    ${tile('Resultat', `<span class="${net >= 0 ? 'good' : 'bad'}">${net >= 0 ? '+' : '−'}${Math.abs(Math.round(net)).toLocaleString('sv-SE')} kr</span>`, staked ? `${sgn(net / staked, 0)} av insatsen` : '')}
+    ${tile('Stängningsvärde', avg != null ? `<span class="${avg > 0 ? 'good' : 'bad'}">${sgn(avg, 1)}</span>` : '–', clv.length ? `${clv.length} spel med stängningsodds` : 'kräver 1X2 eller över/under 2,5')}
+    ${tile('Slog stängningsoddset', beat != null ? pct(beat) : '–')}
+  </div>
+  <p class="note">${avg == null ? '' : avg > 0 ? 'Dina odds har i snitt varit bättre än marknadens pris vid avspark. Det är det bästa tecknet på att du spelar med värde, även om resultatet svänger.' : 'Dina odds har i snitt varit sämre än marknadens pris vid avspark. Då förlorar man i längden. Spela tidigare (när oddsen kommer) och bara på spel med värde.'}</p>`;
 }
 
 async function settleSaved() {
@@ -680,9 +773,18 @@ async function settleSaved() {
   const byId = {};
   for (const lg of need) for (const m of await leagueFile(lg)) byId[m.id] = m;
   const results = {};
-  for (const s of S.saved) for (const l of s.legs) if (byId[l.fid]) results[l.fid + '|' + l.key] = settle(l.key, byId[l.fid]);
+  for (const s of S.saved) {
+    for (const l of s.legs) {
+      const m = byId[l.fid];
+      if (!m) continue;
+      const pc = closingP(l.key, m);
+      results[l.fid + '|' + l.key] = { won: settle(l.key, m), clv: pc ? l.o * pc - 1 : null };
+    }
+  }
   const el = $('#saved');
   if (el) el.innerHTML = savedHtml(results);
+  const ms = $('#mystats');
+  if (ms) { ms.classList.remove('muted'); ms.innerHTML = myStatsHtml(results); }
 }
 
 // ------------------------------------------------------------------ vy: lag
@@ -988,6 +1090,7 @@ function viewModell() {
       </tbody></table></div>` : '<p class="muted">Inga spel med värde mot de här oddsen. Med snittodds är spelbolagens marginal redan inräknad, så marknadens egen bedömning ger aldrig värde mot snittet.</p>'}
       <p class="note">Visar ${esc(per.namn.toLowerCase())}. Få spel och höga odds ger stor slump: några hundra spel räcker inte för att säkert skilja en vinnande metod från tur. Taket på odds ${VALUE_MAX_ODDS} sattes efter att vi sett att långa odds drog ner resultatet, så siffrorna med tak är något optimistiska. Bästa odds är det högsta priset bland spelbolagen i datan och kan vara svårt att få i praktiken.</p>
     </div>
+    ${S.bt.lappar?.length ? `<div class="panel stack"><h2>Lappstrategier</h2><p class="note">Huvudligorna, oddsen före matchen hos ett och samma bolag (en lapp läggs hos ett bolag). Stängningsvärde = oddset jämfört med marknadens rättvisa pris vid avspark. Ett positivt stängningsvärde är det säkraste tecknet på att en strategi går plus i längden, även när resultatet på några få lappar är minus.</p>${strategyTable(false)}</div>` : ''}
     <div class="grid2">
       <div class="panel"><h2>Säkra spel</h2><p class="note">Alla 1X2- och över/under-spel där vår chans var minst 60, 70 eller 80 %, spelade till snittodds.</p>
         <div class="tablewrap" style="margin-top:8px"><table><thead><tr><th>Chans minst</th><th class="num">Spel</th><th class="num">Bedömt</th><th class="num">Gick in</th><th class="num">Snittodds</th><th class="num">Resultat</th></tr></thead><tbody>
@@ -1050,7 +1153,7 @@ function readValue(el) {
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-add],[data-sort],[data-k][data-v],[data-preset],[data-del],[data-use],[data-delsaved],[data-odds],#saveSlip,#clearSlip');
   if (!t) return;
-  if (t.dataset.add) { e.preventDefault(); const [fid, key] = t.dataset.add.split('|'); toggleSlip(fid, key); return; }
+  if (t.dataset.add) { e.preventDefault(); const [fid, key] = t.dataset.add.split('|'); toggleSlip(fid, key, t.dataset.src || S.set.odds); return; }
   if (t.dataset.sort) {
     const tbl = t.closest('table').dataset.table;
     const st = S.ui[tbl];
@@ -1065,7 +1168,7 @@ document.addEventListener('click', e => {
   if (t.dataset.use != null) {
     const legs = S.ui.gen.out[+t.dataset.use];
     S.slip = [];
-    legs.forEach(({ fid, key }) => toggleSlip(fid, key));
+    legs.forEach(({ fid, key }) => toggleSlip(fid, key, S.ui.gen.book));
     return rerender();
   }
   if (t.id === 'saveSlip') {
@@ -1081,6 +1184,7 @@ function onField(e) {
   const t = e.target;
   if (t.id === 'oddsSrc') { S.set.odds = t.value; persist('ml-settings', S.set); S.ui.gen.out = null; return rerender(); }
   if (t.id === 'stake') { S.ui.stake = Math.max(1, +t.value || 100); return rerender(); }
+  if (t.id === 'bank') { S.set.bank = Math.max(100, +t.value || 1000); persist('ml-settings', S.set); return rerender(); }
   if (t.dataset.leg != null) {
     const v = parseFloat(t.value.replace(',', '.'));
     if (v > 1) { S.slip[+t.dataset.leg].o = v; persist('ml-slip', S.slip); }

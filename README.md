@@ -79,7 +79,7 @@ cd site && python -m http.server 8000   # öppna http://localhost:8000
 | **Matcher** | Kommande matcher per dag och liga: chans till 1/X/2, odds, över 2,5 och båda lagen gör mål. Grönt odds = spelvärde. |
 | **Matchsida** | Alla spel (1X2, dubbelchans, mållinjer, båda gör mål, lagmål, första halvlek, hörnor, kort, asiatiskt handikapp) med chans, rättvist odds, odds och värde. Lagjämförelse hemma/borta, form, inbördes möten och domare. |
 | **Spelförslag** | Alla spel på alla kommande matcher, filtrerbart på marknad, chans, odds, värde, dag och liga. Snabbval: värdespel, säkra spel, mål, båda gör mål, hörnor, kort. |
-| **Lappar** | Bygg en lapp, skriv in ditt spelbolags odds och se totalodds, verklig chans och förväntat värde. Lappgeneratorn föreslår tre lappar efter strategi. Sparade lappar rättas automatiskt. |
+| **Lappar** | Värdelappar hos ditt spelbolag (Bet365 eller bwin) och värdesinglar, med föreslagen insats efter din spelkassa (¼ Kelly, högst 3 %). Bygg egna lappar med ditt spelbolags odds. Sparade lappar rättas automatiskt, och "Din statistik" visar resultat och stängningsvärde. |
 | **Lag** | Sorterbar tabell över alla lag (översikt, mål, hörnor och kort, resultat om man spelat varje match) med uppdelning alla/hemma/borta/senaste 6. Lagsidor med all statistik, sviter och matchlista. |
 | **Domare** | Kort per match, kortfaktor mot ligasnittet, över 3,5/4,5 kort, fouls, mål och hemmavinster, plus kommande uppdrag. |
 | **Ligor** | Europacuper, ligor och cuper: tabell, snitt, senaste resultat (med hörnor, kort, skott och bollinnehav) och topplistor. |
@@ -95,6 +95,18 @@ cd site && python -m http.server 8000   # öppna http://localhost:8000
 **Värde** = chans × odds − 1. Spel som saknar odds i datan (t.ex. båda gör mål, hörnor, kort) visar ett uppskattat odds med ≈; jämför rättvist odds med ditt spelbolag.
 
 Backtestet (`scripts/fotboll/build.py`) skattar om modellen varje vecka på matcherna före och tippar veckans matcher. Spel med minst 3 % värde mot bästa odds och odds upp till 5 gav +7 % förra säsongen (707 spel) och +9 % hittills i år (169 spel). Utan oddstak blev det förlust. Säkra spel (chans ≥ 70 %) gick in lika ofta som bedömt men gav −2 % till snittodds. Inget av detta är en garanti.
+
+## Lappstrategi
+En lapp läggs hos ett spelbolag, så strategierna testas med odds från ett och samma bolag. Resultat i huvudligorna (förra säsongen / innevarande):
+
+| Strategi | Resultat | Stängningsvärde | Slog stängningsoddset |
+|---|---|---|---|
+| Säker dubbel/trippel (högst chans), Bet365 | −10 till −16 % / −4 % | −6 % | 4–8 % |
+| Värdesinglar, Bet365 | −11 % / −29 % | +2,5 % / −0,7 % | 63 % / 47 % |
+| Värdesinglar, bwin (få spel) | +63 % / +29 % | +11 % / +6,5 % | 100 % / 90 % |
+| Värdesinglar, bästa odds | +1 % / −7 % | +4,5 % / +6,4 % | 70 % / 70 % |
+
+Stängningsvärdet (oddset jämfört med marknadens rättvisa pris vid avspark) säger mest om en strategi går plus i längden, eftersom resultatet på några hundra spel styrs av slumpen. "Säkra" lappar ger alltid sämre odds än stängningen och förlorar. Generatorn väljer därför som standard bara spel med minst 2 % värde hos det valda bolaget och föreslår hellre singlar och dubblar än långa lappar.
 
 ## Data
 - [football-data.co.uk](https://www.football-data.co.uk): resultat, halvtid, skott, hörnor, kort, fouls, xG, domare (England och Skottland) och odds för 22 huvudligor (tre säsonger), resultat och stängningsodds för 10 extra ligor, samt kommande matcher med odds.
