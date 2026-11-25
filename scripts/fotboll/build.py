@@ -318,7 +318,7 @@ def league_roi(cands, info, thr=0.05):
 
 # ---------------------------------------------------------------- lappstrategier
 
-SLIP_BOOKS = {"b365": "Bet365", "bw": "bwin", "max": "Bästa odds"}
+SLIP_BOOKS = {"b365": "Bet365", "bw": "bwin", "b365bw": "Bet365 eller bwin", "max": "Bästa odds"}
 VALUE_THR = 0.02  # minsta värde för ett värdespel
 
 
@@ -332,23 +332,33 @@ def _round_key(d):
     return d - timedelta(days=wd - 1)
 
 
+def _book_odds(o, book, k):
+    """Ett bolags odds, eller det högsta av Bet365 och bwin för 'b365bw'."""
+    if book == "b365bw":
+        xs = [o[b][k] for b in ("b365", "bw") if b in o]
+        return max(xs) if xs else None
+    return o[book][k] if book in o else None
+
+
 def _slip_legs(m, book):
     """Spel för en match med ett spelbolags odds: (p, odds, vann, stängningsvärde).
     p = marknadens chans utan marginal (snittodds), som sidan använder."""
     o, oc = m["odds"], m.get("odds_c") or {}
     out = []
     res = outcome(m)
-    if "avg" in o.get("1x2", {}) and book in o.get("1x2", {}):
+    if "avg" in o.get("1x2", {}):
         p, pc = M.devig(o["1x2"]["avg"]), (M.devig(oc["1x2"]["avg"]) if "avg" in oc.get("1x2", {}) else None)
         for k in range(3):
-            od = o["1x2"][book][k]
-            out.append((p[k], od, res == k, od * pc[k] - 1 if pc else None))
-    if "avg" in o.get("ou25", {}) and book in o.get("ou25", {}):
+            od = _book_odds(o["1x2"], book, k)
+            if od:
+                out.append((p[k], od, res == k, od * pc[k] - 1 if pc else None))
+    if "avg" in o.get("ou25", {}):
         p, pc = M.devig(o["ou25"]["avg"]), (M.devig(oc["ou25"]["avg"]) if "avg" in oc.get("ou25", {}) else None)
         over = m["hg"] + m["ag"] > 2.5
         for k in range(2):
-            od = o["ou25"][book][k]
-            out.append((p[k], od, over if k == 0 else not over, od * pc[k] - 1 if pc else None))
+            od = _book_odds(o["ou25"], book, k)
+            if od:
+                out.append((p[k], od, over if k == 0 else not over, od * pc[k] - 1 if pc else None))
     return out
 
 
@@ -384,7 +394,7 @@ def slip_backtest(by_lg, info):
         return out
 
     result = []
-    for book in ("b365", "bw", "max"):
+    for book in ("b365", "bw", "b365bw", "max"):
         singles, legs_used = [], []
         rounds = defaultdict(list)
         for m in rows:
@@ -395,8 +405,8 @@ def slip_backtest(by_lg, info):
                     legs_used.append((clv, m["season"]))
                     rounds[_round_key(m["date"])].append((e, m["id"], od, won, clv, m["season"]))
         result.append(summarize("Värdesinglar", f"Alla spel med minst {round(VALUE_THR * 100)} % värde och odds upp till {VALUE_MAX_ODDS:g}, ett i taget.", book, singles, legs_used))
-        if book == "max":
-            continue  # bästa odds finns hos olika bolag och går inte att kombinera på en lapp
+        if book in ("max", "b365bw"):
+            continue  # odds från olika bolag går inte att kombinera på en lapp
         for k, name in ((2, "Värdedubbel"), (3, "Värdetrippel")):
             slips, lu = [], []
             for rk, ls in rounds.items():

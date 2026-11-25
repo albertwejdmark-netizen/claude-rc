@@ -97,16 +97,15 @@ cd site && python -m http.server 8000   # öppna http://localhost:8000
 Backtestet (`scripts/fotboll/build.py`) skattar om modellen varje vecka på matcherna före och tippar veckans matcher. Spel med minst 3 % värde mot bästa odds och odds upp till 5 gav +7 % förra säsongen (707 spel) och +9 % hittills i år (169 spel). Utan oddstak blev det förlust. Säkra spel (chans ≥ 70 %) gick in lika ofta som bedömt men gav −2 % till snittodds. Inget av detta är en garanti.
 
 ## Lappstrategi
-En lapp läggs hos ett spelbolag, så strategierna testas med odds från ett och samma bolag. Resultat i huvudligorna (förra säsongen / innevarande):
+En lapp läggs hos ett spelbolag, så strategierna testas med odds från ett och samma bolag (eller det högsta av Bet365 och bwin, spelat som singlar). Det rättvisa priset räknas från snittoddsen med power-metoden, som tar mer av marginalen från långa odds. Den träffade bättre än att dela marginalen lika (log-loss 1X2 1,0021 mot 1,0030 och 0,9836 mot 0,9859) och tog bort falska värdespel på långa odds. Resultat i huvudligorna (förra säsongen / innevarande):
 
 | Strategi | Resultat | Stängningsvärde | Slog stängningsoddset |
 |---|---|---|---|
-| Säker dubbel/trippel (högst chans), Bet365 | −10 till −16 % / −4 % | −6 % | 4–8 % |
-| Värdesinglar, Bet365 | −11 % / −29 % | +2,5 % / −0,7 % | 63 % / 47 % |
-| Värdesinglar, bwin (få spel) | +63 % / +29 % | +11 % / +6,5 % | 100 % / 90 % |
-| Värdesinglar, bästa odds | +1 % / −7 % | +4,5 % / +6,4 % | 70 % / 70 % |
+| Säker dubbel/trippel (högst chans), Bet365 | −13 till −15 % / −9 till −14 % | −2 till −3 % | 24–30 % |
+| Värdesinglar, Bet365 eller bwin | +20 % (19 spel) / +6 % (16 spel) | +6,5 % / +4,9 % | 68 % / 75 % |
+| Värdesinglar, bästa odds | +15 % (224 spel) / −12 % (68 spel) | +6,6 % / +13,8 % | 74 % / 84 % |
 
-Stängningsvärdet (oddset jämfört med marknadens rättvisa pris vid avspark) säger mest om en strategi går plus i längden, eftersom resultatet på några hundra spel styrs av slumpen. "Säkra" lappar ger alltid sämre odds än stängningen och förlorar. Generatorn väljer därför som standard bara spel med minst 2 % värde hos det valda bolaget och föreslår hellre singlar och dubblar än långa lappar.
+Stängningsvärdet (oddset jämfört med marknadens rättvisa pris vid avspark) säger mest om en strategi går plus i längden, eftersom resultatet på några hundra spel styrs av slumpen. Värdespel är få: några per månad hos ett enskilt bolag. Generatorn föreslår därför singlar med insats efter spelkassan (¼ Kelly, högst 3 %), och dubblar bara när samma bolag har två värdespel.
 
 ## Data
 - [football-data.co.uk](https://www.football-data.co.uk): resultat, halvtid, skott, hörnor, kort, fouls, xG, domare (England och Skottland) och odds för 22 huvudligor (tre säsonger), resultat och stängningsodds för 10 extra ligor, samt kommande matcher med odds.

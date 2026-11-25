@@ -36,17 +36,31 @@ function persist(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } cat
 
 // ------------------------------------------------------------------ tillstånd
 const SRC = { avg: 0, max: 1, b365: 2, bw: 3 }; // samma ordning som oddslistorna i fixtures.json
-const SRC_NAME = { avg: 'snittodds', max: 'bästa odds', b365: 'Bet365', bw: 'bwin' };
+const SRC_NAME = { avg: 'snittodds', max: 'bästa odds', b365: 'Bet365', bw: 'bwin', b365bw: 'Bet365 eller bwin' };
+
+/** Index i en oddslista för vald källa. 'b365bw' = det högsta av Bet365 och bwin.
+ *  Bara "bästa odds" får falla tillbaka på snittet; ett spelbolags odds får aldrig låtsas finnas. */
+function srcIndex(arr, src) {
+  if (!arr) return null;
+  if (src === 'b365bw') {
+    if (arr[2] == null && arr[3] == null) return null;
+    return (arr[3] ?? 0) > (arr[2] ?? 0) ? 3 : 2;
+  }
+  const i = SRC[src];
+  if (arr[i] != null) return i;
+  return src === 'max' && arr[0] != null ? 0 : null;
+}
+const BOOK_AT = { 2: 'Bet365', 3: 'bwin' };
 const S = {
   meta: null, fx: [], fxById: {}, teams: {}, leagues: {}, refs: {}, bt: null, files: {},
-  set: Object.assign({ odds: 'max', bank: 1000 }, store('ml-settings', {})),
+  set: Object.assign({ odds: 'b365bw', bank: 1000 }, store('ml-settings', {})),
   slip: store('ml-slip', []), saved: store('ml-saved', []),
   ui: {
     day: 'all', lg: 'all', q: '', onlyValue: false,
-    spel: { preset: 'varde', group: 'all', minP: 0.15, minO: 1.2, maxO: 5, minE: 0.03, real: true, day: 'all', lg: 'all', sort: 'e', asc: false },
+    spel: { preset: 'varde', group: 'all', minP: 0.2, minO: 1.2, maxO: 5, minE: 0.02, real: true, day: 'all', lg: 'all', sort: 'e', asc: false },
     lag: { lg: 'all', set: 'oversikt', split: 'all', q: '', sort: 'ppg', asc: false },
     dom: { lg: 'all', minN: 5, sort: 'k', asc: false },
-    gen: { n: 2, strat: 'varde', book: 'b365', minE: 0.02, minO: 1.2, maxO: 2.5, days: 'all', est: false, out: null, singles: [] },
+    gen: { n: 2, strat: 'varde', book: 'b365bw', minE: 0.02, minO: 1.2, maxO: 2.5, days: 'all', est: false, out: null, singles: [] },
     bt: { odds: 'max', grp: 'Alla', per: 1, cap: true },
     cmp: 'venue', stake: 100,
   },
@@ -134,10 +148,10 @@ function ahTxt(l) { if (l == null) return ''; return (l > 0 ? '+' : l < 0 ? '−
 
 /** Odds för ett spel med vald oddskälla. kind: real (från spelbolagen), calc (räknat från 1X2), est (uppskattat). */
 function oddsOf(f, key, src = S.set.odds) {
-  const i = SRC[src];
-  // bara "bästa odds" får falla tillbaka på snittet; ett spelbolags odds får aldrig låtsas finnas
-  const pick = arr => arr ? (arr[i] ?? (src === 'max' ? arr[0] : null)) : null;
-  if (f.odds?.[key]) { const o = pick(f.odds[key]); if (o) return { o, kind: 'real' }; }
+  if (f.odds?.[key]) {
+    const j = srcIndex(f.odds[key], src);
+    if (j != null) return { o: f.odds[key][j], kind: 'real', at: src === 'b365bw' ? BOOK_AT[j] : null };
+  }
   if (['1X', '12', 'X2'].includes(key) && f.odds?.['1']) {
     // dubbelchans räknas från snittodds: bästa odds från olika spelbolag går inte att kombinera
     const [a, b] = key === '1X' ? ['1', 'X'] : key === '12' ? ['1', '2'] : ['X', '2'];
@@ -158,15 +172,15 @@ function picks(f) {
       const p = f.p[k];
       if (p == null) continue;
       const od = oddsOf(f, k);
-      out.push({ f, key: k, group: g, p, fair: fair(p), o: od?.o ?? null, kind: od?.kind ?? null, e: od && od.kind !== 'est' ? p * od.o - 1 : null });
+      out.push({ f, key: k, group: g, p, fair: fair(p), o: od?.o ?? null, kind: od?.kind ?? null, at: od?.at, e: od && od.kind !== 'est' ? p * od.o - 1 : null });
     }
   }
   if (f.ah) {
-    const i = SRC[S.set.odds];
     for (const side of ['H', 'A']) {
       const s = f.ah[side];
       if (!s) continue;
-      const o = s.odds[i] ?? (S.set.odds === 'max' ? s.odds[0] : null), e = s.ev[i] ?? (S.set.odds === 'max' ? s.ev[0] : null);
+      const j = srcIndex(s.odds, S.set.odds);
+      const o = j != null ? s.odds[j] : null, e = j != null ? s.ev[j] : null;
       if (o) out.push({ f, key: 'AH:' + side, group: 'Asiatiskt handikapp', p: s.pwin, fair: null, o, kind: 'real', e, ah: true });
     }
   }
@@ -271,7 +285,7 @@ const legend1x2 = () => `<span class="legend"><span><i style="background:var(--c
 
 function oddsCell(x) {
   if (x.o == null) return '<span class="faint">–</span>';
-  if (x.kind === 'real') return dec(x.o);
+  if (x.kind === 'real') return x.at ? `${dec(x.o)} <span class="small faint">${x.at}</span>` : dec(x.o);
   const t = x.kind === 'calc' ? 'Räknat från 1X2-oddsen' : 'Uppskattat (rättvist odds minus 7 % marginal) – kolla ditt spelbolag';
   return `<span class="est" title="${t}">≈${dec(x.o)}</span>`;
 }
@@ -489,7 +503,7 @@ async function fillH2H(f) {
 
 // ------------------------------------------------------------------ vy: spelförslag
 const PRESETS = {
-  varde: { label: 'Värdespel', set: { group: 'all', minP: 0.15, minO: 1.2, maxO: VALUE_MAX_ODDS, minE: 0.03, real: true, sort: 'e', asc: false } },
+  varde: { label: 'Värdespel', set: { group: 'all', minP: 0.2, minO: 1.2, maxO: VALUE_MAX_ODDS, minE: 0.02, real: true, sort: 'e', asc: false } },
   sakra: { label: 'Säkra spel', set: { group: 'all', minP: 0.75, minO: 1.15, maxO: 15, minE: -1, real: false, sort: 'p', asc: false } },
   mal: { label: 'Mål', set: { group: 'Mål', minP: 0.6, minO: 1.2, maxO: 15, minE: -1, real: false, sort: 'p', asc: false } },
   blgm: { label: 'Båda gör mål', set: { group: 'Båda lagen gör mål', minP: 0.55, minO: 1.2, maxO: 15, minE: -1, real: false, sort: 'p', asc: false } },
@@ -497,15 +511,13 @@ const PRESETS = {
   kort: { label: 'Kort', set: { group: 'Kort', minP: 0.65, minO: 1.2, maxO: 15, minE: -1, real: false, sort: 'p', asc: false } },
 };
 
-function btSummary(thr = 0.03) {
-  const b = S.bt;
-  if (!b) return '';
-  const src = S.set.odds === 'avg' ? 'avg' : 'max';
-  const parts = b.perioder.map(p => {
-    const r = p.roi.find(x => x.odds === src && x.grupp === 'Alla' && x.maxodds === VALUE_MAX_ODDS && x.troskel === thr);
-    return r ? `${p.namn.toLowerCase()} ${sgn(r.roi, 0)} på ${r.n} spel` : null;
-  }).filter(Boolean);
-  return parts.length ? `I backtestet gav alla spel med minst ${Math.round(thr * 100)} % värde och odds upp till ${VALUE_MAX_ODDS} mot ${src === 'avg' ? 'snittodds' : 'bästa odds'}: ${parts.join(', ')}. Ingen garanti, men det är där spel kan löna sig i längden.` : '';
+function btSummary() {
+  const name = { b365: 'Bet365', bw: 'bwin', b365bw: 'Bet365 eller bwin', max: 'Bästa odds' }[S.set.odds];
+  if (!name) return 'Med snittodds finns inget värde, eftersom spelbolagens marginal redan är inräknad. Välj ditt spelbolag i menyn uppe till höger.';
+  const r = (S.bt?.lappar || []).find(x => x.namn === 'Värdesinglar' && x.bolag === name);
+  if (!r) return '';
+  const parts = r.perioder.filter(p => p.n).map(p => `${p.namn.toLowerCase()} ${sgn(p.roi, 0)} på ${p.n} spel och slog stängningsoddset ${pct(p.slogStangning)} av gångerna`);
+  return parts.length ? `Värdespel med ${name === 'Bästa odds' ? 'bästa odds' : name}: i backtestet gav de ${parts.join(', ')}. Att slå stängningsoddset är det säkraste tecknet på att spelen har värde. Ingen garanti.` : '';
 }
 
 function viewSpel() {
@@ -518,6 +530,7 @@ function viewSpel() {
     if (u.day !== 'all' && dayKey(f.ko) !== u.day) continue;
     for (const x of picks(f)) {
       if (u.group !== 'all' && x.group !== u.group) continue;
+      if (u.preset === 'varde' && x.ah) continue; // bara backtestade marknader (1X2, över/under 2,5) som värdespel
       if (u.real && x.kind !== 'real') continue;
       if (x.p < u.minP) continue;
       if (x.o != null && (x.o < u.minO || x.o > u.maxO)) continue;
@@ -551,15 +564,16 @@ function viewSpel() {
       <td><a href="#match-${esc(x.f.id)}">${esc(x.f.home)} – ${esc(x.f.away)}</a><div class="small faint">${esc(lgName(x.f.lg))}</div></td>
       <td class="wrap">${esc(label(x.key, x.f))}</td>
       <td class="num">${pct(x.p)}</td><td class="num">${x.fair ? dec(x.fair) : '–'}</td><td class="num">${oddsCell(x)}</td><td class="num">${edgeCell(x.e, x.kind)}</td>
-      ${u.preset === 'varde' ? `<td class="num">${x.kind === 'real' ? kellyStake(x.p, x.o) + ' kr' : '–'}</td>` : ''}
+      ${u.preset === 'varde' ? `<td class="num">${x.kind === 'real' && !x.ah ? kellyStake(x.p, x.o) + ' kr' : '–'}</td>` : ''}
       <td>${addBtn(x.f.id, x.key)}</td></tr>`).join('')}</tbody></table></div>`
-    : `<div class="panel">Inga spel matchar filtret.${u.preset === 'varde' && S.set.odds !== 'max' ? ' Med snittodds finns nästan aldrig värde eftersom spelbolagens marginal redan är inräknad. Välj <button class="link" data-odds="max">bästa odds</button> för att se var enskilda spelbolag ligger över marknaden.' : ''}</div>`}
+    : `<div class="panel">Inga spel matchar filtret.${u.preset === 'varde' ? (S.set.odds === 'avg' ? ' Med snittodds finns inget värde eftersom spelbolagens marginal redan är inräknad. Välj <button class="link" data-odds="b365bw">Bet365/bwin</button> i menyn.' : ' Värdespel är få och dyker oftast upp när oddsen för helgen kommer på fredagen och för veckomatcherna på tisdagen.') : ''}</div>`}
   </div>`;
 }
 
 // ------------------------------------------------------------------ vy: lappar
 const KELLY = 0.25, KELLY_CAP = 0.03; // kvarts-Kelly, högst 3 % av kassan per lapp
-const BOOKS = { b365: 'Bet365', bw: 'bwin', max: 'Bästa odds (bara singlar)' };
+const BOOKS = { b365bw: 'Bet365 eller bwin (singlar)', b365: 'Bet365', bw: 'bwin', max: 'Bästa odds (singlar)' };
+const SINGLES_ONLY = new Set(['b365bw', 'max']); // odds från olika bolag går inte att kombinera på en lapp
 
 /** Föreslagen insats (kr) efter spelkassa och värde. 0 om spelet saknar värde. */
 function kellyStake(p, o) {
@@ -572,7 +586,7 @@ function kellyStake(p, o) {
 }
 
 const STRATS = {
-  varde: { label: 'Värdelapp (rekommenderas)', keys: ['1', 'X', '2', 'O2.5', 'U2.5'], value: true },
+  varde: { label: 'Värdespel (rekommenderas)', keys: ['1', 'X', '2', 'O2.5', 'U2.5'], value: true },
   chans: { label: 'Högst chans (förlorar i längden)', keys: ['1', '2', '1X', 'X2', 'O2.5', 'U2.5'], score: x => x.p },
   mal: { label: 'Mål', keys: ['O1.5', 'O2.5', 'BTTS:J', 'H:O0.5', 'A:O0.5', 'FH:O0.5', 'H:O1.5', 'A:O1.5'], score: x => x.p },
   horn: { label: 'Hörnor och kort', keys: [...CORNER_LINES.flatMap(l => ['C:O' + l, 'C:U' + l]), ...CARD_LINES.flatMap(l => ['K:O' + l, 'K:U' + l])], score: x => x.p, est: true },
@@ -592,7 +606,7 @@ function generate() {
       if (p == null) continue;
       const od = oddsOf(f, key, g.book);
       if (!od) continue;
-      const x = { f, key, p, o: od.o, kind: od.kind, e: p * od.o - 1 };
+      const x = { f, key, p, o: od.o, kind: od.kind, at: od.at, e: p * od.o - 1 };
       if (st.value) {
         // värde: bara riktiga odds hos det valda bolaget, minst 2 % värde, inga långa odds
         if (od.kind !== 'real' || x.e < g.minE || od.o > VALUE_MAX_ODDS || p < 0.2) continue;
@@ -609,7 +623,7 @@ function generate() {
   g.singles = st.value ? cands.map(c => ({ fid: c.f.id, key: c.key })) : [];
   const usedFx = new Set(), slips = [];
   // bästa odds finns hos olika spelbolag och går inte att kombinera på en lapp
-  for (let s = 0; s < (g.book === 'max' && st.value ? 0 : 3); s++) {
+  for (let s = 0; s < (SINGLES_ONLY.has(g.book) && st.value ? 0 : 3); s++) {
     const legs = [], fxs = new Set();
     for (const c of cands) {
       if (usedFx.has(c.f.id) || fxs.has(c.f.id)) continue;
@@ -635,7 +649,7 @@ function strategyTable(compact = false) {
   if (!rows.length) return '';
   const cell = p => p && p.n ? `<td class="num">${p.n}</td><td class="num"><b class="${p.roi > 0 ? 'good' : 'bad'}">${sgn(p.roi, 0)}</b></td><td class="num">${p.clv != null ? `<span class="${p.clv > 0 ? 'good' : 'bad'}">${sgn(p.clv, 1)}</span>` : '–'}</td><td class="num">${pct(p.slogStangning)}</td>`
     : '<td class="num">0</td><td class="num">–</td><td class="num">–</td><td class="num">–</td>';
-  const list = compact ? rows.filter(r => r.bolag !== 'bwin' || r.perioder.some(p => p.n >= 5)) : rows;
+  const list = compact ? rows.filter(r => r.perioder.some(p => p.n >= 5)) : rows;
   return `<div class="tablewrap"><table><thead><tr><th>Strategi</th><th>Odds</th><th class="num">Lappar</th><th class="num">Resultat</th><th class="num" title="Oddset jämfört med marknadens rättvisa pris vid avspark">Stängningsvärde</th><th class="num">Slog stängning</th><th class="num">Lappar</th><th class="num">Resultat</th><th class="num">Stängningsvärde</th><th class="num">Slog stängning</th></tr>
     <tr><th></th><th></th><th colspan="4" class="num">${esc(rows[0].perioder[0].namn)}</th><th colspan="4" class="num">${esc(rows[0].perioder[1].namn)}</th></tr></thead>
     <tbody>${list.map(r => `<tr><td title="${esc(r.beskrivning)}">${esc(r.namn)}</td><td class="small muted">${esc(r.bolag)}</td>${cell(r.perioder[0])}${cell(r.perioder[1])}</tr>`).join('')}</tbody></table></div>`;
@@ -665,7 +679,7 @@ function viewLappar() {
       <div class="row" style="margin-top:8px"><button class="primary" id="saveSlip">Spara lappen</button><button id="clearSlip">Töm lappen</button></div>`
     : '<p class="muted">Lappen är tom. Använd ett förslag nedan, eller lägg till spel med + på <a href="#spel">Spelförslag</a> eller en matchsida.</p>';
 
-  const legInfo = ({ fid, key }) => { const f = S.fxById[fid]; const od = f && oddsOf(f, key, g.book); return f && od ? { f, key, p: f.p[key], o: od.o, kind: od.kind } : null; };
+  const legInfo = ({ fid, key }) => { const f = S.fxById[fid]; const od = f && oddsOf(f, key, g.book); return f && od ? { f, key, p: f.p[key], o: od.o, kind: od.kind, at: od.at } : null; };
   const gen = (g.out || []).map((legsKeys, i) => {
     const ls = legsKeys.map(legInfo).filter(Boolean);
     const s = slipStats(ls.map(l => ({ ...l, fid: l.f.id })));
@@ -696,17 +710,17 @@ function viewLappar() {
           <label class="field" for="gD">Period <select id="gD" data-k="gen.days"><option value="1" ${g.days === '1' ? 'selected' : ''}>Idag</option><option value="2" ${g.days === '2' ? 'selected' : ''}>Idag och imorgon</option><option value="all" ${g.days === 'all' ? 'selected' : ''}>Alla kommande</option></select></label>
           ${isValue ? '' : `<label class="check" for="gE"><input type="checkbox" id="gE" data-k="gen.est" ${g.est ? 'checked' : ''}> Ta med spel utan riktiga odds</label>`}
         </div>
-        <p class="note">${isValue ? `Väljer 1X2 och över/under 2,5 där ${g.book === 'max' ? 'det bästa oddset' : BOOKS[g.book] + 's odds'} är minst ${Math.round(g.minE * 100)} % över marknadens rättvisa pris (chans minst 20 %, odds högst ${VALUE_MAX_ODDS}), ett spel per match. Hela lappen läggs hos samma bolag. Har du konto hos båda: jämför och ta det bolag som ger mest värde.`
+        <p class="note">${isValue ? `Väljer 1X2 och över/under 2,5 där ${g.book === 'max' ? 'det bästa oddset' : g.book === 'b365bw' ? 'det högsta oddset hos Bet365 eller bwin' : BOOKS[g.book] + 's odds'} är minst ${Math.round(g.minE * 100)} % över marknadens rättvisa pris (chans minst 20 %, odds högst ${VALUE_MAX_ODDS}), ett spel per match. Det rättvisa priset räknas från snittoddsen, där spelbolagens extra marginal på långa odds räknas bort.${SINGLES_ONLY.has(g.book) ? '' : ' Hela lappen läggs hos samma bolag.'}`
           : g.strat === 'chans' ? 'Väljer de spel som oftast går in. Spelbolagens marginal gör att de här lapparna förlorar i längden, se tabellen nedan.'
           : g.strat === 'mal' ? 'Väljer målspel med högst chans. Oddsen för de flesta målspel saknas i datan, så värdet går inte att räkna. Jämför rättvist odds med ditt spelbolag.'
           : 'Hörnor och kort har inga odds i datan, oddsen är uppskattade. Kolla ditt spelbolag.'}</p>
       </div>
     </div>
-    ${gen ? `<div class="grid3">${gen}</div>` : `<div class="panel muted">${isValue && g.book === 'max' ? 'Bästa odds kommer från olika spelbolag (Bet365, bwin, Betfred, BetVictor, Paddy Power, Sky Bet och Betfairs spelbörs) och kan inte kombineras på en lapp. Spela värdesinglarna nedan hos det bolag som har oddset. I backtestet var det den här strategin som slog stängningsoddset oftast.' : isValue ? `Just nu finns färre än två spel med minst ${Math.round(g.minE * 100)} % värde hos ${BOOKS[g.book]}. Det är normalt: värde finns oftast på några få spel per omgång, mest när oddsen för helgen kommer på fredagen och för veckomatcherna på tisdagen. Byt bolag, sänk minsta värde eller spela värdesinglarna nedan.` : 'Hittade inga förslag med de inställningarna. Prova ett bredare oddsintervall eller längre period.'}</div>`}
-    ${isValue ? `<div class="panel"><h2>Värdesinglar ${g.book === 'max' ? 'med bästa odds' : 'hos ' + BOOKS[g.book]}</h2><p class="note">Singlar har lägre risk än lappar: värdet är detsamma per spel, men en förlust slår inte ut hela lappen. I backtestet var det singlarna som gav jämnast resultat.</p>
+    ${gen ? `<div class="grid3">${gen}</div>` : `<div class="panel muted">${isValue && g.book === 'b365bw' ? 'Med två bolag tar du det högsta oddset för varje spel, så spelen läggs som singlar hos olika bolag. Det ger fler värdespel än ett bolag, och i backtestet slog de stängningsoddset 68–75 % av gångerna. Har du bara konto hos ett av bolagen: välj det, så visas även dubblar när det finns två värdespel hos samma bolag.' : isValue && g.book === 'max' ? 'Bästa odds kommer från olika spelbolag (Bet365, bwin, Betfred, BetVictor, Paddy Power, Sky Bet och Betfairs spelbörs) och kan inte kombineras på en lapp. Spela värdesinglarna nedan hos det bolag som har oddset.' : isValue ? `Just nu finns färre än två spel med minst ${Math.round(g.minE * 100)} % värde hos ${BOOKS[g.book]}. Det är normalt: värde finns oftast på några få spel per omgång, mest när oddsen för helgen kommer på fredagen och för veckomatcherna på tisdagen. Byt bolag, sänk minsta värde eller spela värdesinglarna nedan.` : 'Hittade inga förslag med de inställningarna. Prova ett bredare oddsintervall eller längre period.'}</div>`}
+    ${isValue ? `<div class="panel"><h2>Värdesinglar ${g.book === 'max' ? 'med bästa odds' : g.book === 'b365bw' ? 'hos Bet365 eller bwin' : 'hos ' + BOOKS[g.book]}</h2><p class="note">Singlar har lägre risk än lappar: värdet är detsamma per spel, men en förlust slår inte ut hela lappen. I backtestet var det singlarna som gav jämnast resultat.</p>
       ${singles.length ? `<div class="tablewrap" style="margin-top:8px"><table><thead><tr><th>Avspark</th><th>Match</th><th>Spel</th><th class="num">Chans</th><th class="num">Odds</th><th class="num">Värde</th><th class="num">Insats</th><th></th></tr></thead><tbody>${singles.map(l =>
-        `<tr><td class="faint">${dayChip(dayKey(l.f.ko))} ${hm(l.f.ko)}</td><td><a href="#match-${esc(l.f.id)}">${esc(l.f.home)} – ${esc(l.f.away)}</a></td><td class="wrap">${esc(label(l.key, l.f))}</td><td class="num">${pct(l.p)}</td><td class="num">${dec(l.o)}</td><td class="num">${edgeCell(l.p * l.o - 1, 'real')}</td><td class="num"><b>${kellyStake(l.p, l.o)} kr</b></td><td>${addBtn(l.f.id, l.key, g.book)}</td></tr>`).join('')}</tbody></table></div>`
-        : `<p class="muted">Inga spel med värde ${g.book === 'max' ? 'mot bästa odds' : 'hos ' + BOOKS[g.book]} just nu.</p>`}</div>` : ''}
+        `<tr><td class="faint">${dayChip(dayKey(l.f.ko))} ${hm(l.f.ko)}</td><td><a href="#match-${esc(l.f.id)}">${esc(l.f.home)} – ${esc(l.f.away)}</a></td><td class="wrap">${esc(label(l.key, l.f))}</td><td class="num">${pct(l.p)}</td><td class="num">${dec(l.o)}${l.at ? ` <span class="small faint">${l.at}</span>` : ''}</td><td class="num">${edgeCell(l.p * l.o - 1, 'real')}</td><td class="num"><b>${kellyStake(l.p, l.o)} kr</b></td><td>${addBtn(l.f.id, l.key, g.book)}</td></tr>`).join('')}</tbody></table></div>`
+        : `<p class="muted">Inga spel med värde ${g.book === 'max' ? 'mot bästa odds' : g.book === 'b365bw' ? 'hos Bet365 eller bwin' : 'hos ' + BOOKS[g.book]} just nu. Värdespel dyker oftast upp när oddsen för helgen kommer på fredagen och för veckomatcherna på tisdagen.</p>`}</div>` : ''}
     <div class="panel"><h2>Din statistik</h2><div id="mystats" class="muted">Spara lappar för att se hur det går. Statistiken räknas när matcherna är spelade.</div></div>
     <div class="panel"><h2>Sparade lappar</h2><div id="saved">${savedHtml()}</div></div>
     <div class="panel"><h2>Så har strategierna gått</h2>
@@ -716,8 +730,19 @@ function viewLappar() {
   </div>`;
 }
 
+/** Chanser utan marginal med power-metoden (samma som build.py). */
+function devig(odds) {
+  const inv = odds.map(o => 1 / o);
+  const sum = a => a.reduce((t, x) => t + x, 0);
+  if (sum(inv) <= 1) return inv.map(x => x / sum(inv));
+  let lo = 1, hi = 3;
+  for (let i = 0; i < 40; i++) { const k = (lo + hi) / 2; if (sum(inv.map(x => x ** k)) > 1) lo = k; else hi = k; }
+  const p = inv.map(x => x ** ((lo + hi) / 2));
+  return p.map(x => x / sum(p));
+}
+
 function closingP(key, m) {
-  const dv = a => { if (a.some(x => !x)) return null; const s = a.reduce((t, x) => t + 1 / x, 0); return a.map(x => 1 / x / s); };
+  const dv = a => a.some(x => !x) ? null : devig(a);
   const p1 = m.cH ? dv([m.cH, m.cD, m.cA]) : null, pou = m.cO ? dv([m.cO, m.cU]) : null;
   const map = { '1': p1?.[0], 'X': p1?.[1], '2': p1?.[2], '1X': p1 && p1[0] + p1[1], '12': p1 && p1[0] + p1[2], 'X2': p1 && p1[1] + p1[2], 'O2.5': pou?.[0], 'U2.5': pou?.[1] };
   return map[key] ?? null;
@@ -1062,7 +1087,7 @@ function viewModell() {
     <div class="grid2">
       <div class="panel stack"><h2>Så räknas chanserna</h2>
         <p>1. <b>Statistikmodell.</b> Varje lag får en anfalls- och försvarsstyrka från mål, xG och skott på mål de senaste två säsongerna, där nya matcher väger mest. Nyuppflyttade lag startar lite svagare, nedflyttade lite starkare. Ur styrkorna räknas förväntade mål och en resultatmatris.</p>
-        <p>2. <b>Marknaden.</b> Spelbolagens odds räknas om till förväntade mål, utan spelbolagens marginal.</p>
+        <p>2. <b>Marknaden.</b> Spelbolagens snittodds räknas om till förväntade mål, utan spelbolagens marginal. Marginalen räknas bort mest från långa odds, där spelbolagen också lägger mest av den (power-metoden). Det träffade bättre i backtestet än att dela den lika.</p>
         <p>3. <b>Kombination.</b> Vikten mellan modell och marknad väljs i backtestet. Just nu är modellens vikt <b>${Math.round(b.alpha * 100)} %</b>, eftersom oddsen träffade bättre än statistiken ensam. Därför bygger chanserna för 1X2 och mål i praktiken på marknaden, medan modellen och lagstatistiken står för hörnor och kort.</p>
         <p>4. <b>Alla andra spel</b> (båda gör mål, lagmål, första halvlek, andra mållinjer) räknas ur samma förväntade mål. Hörnor och kort räknas från lagens snitt för och emot, och för kort också domarens kortfaktor.</p>
         <p class="note">Värde = chans × odds − 1. Ett spel med 50 % chans och odds 2,20 har värdet +10 %.</p>
