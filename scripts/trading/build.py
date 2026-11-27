@@ -60,6 +60,7 @@ TIMEFRAMES = [
     {"id": "1m", "name": "1 min", "short": "1m", "min": 1, "src": "1m", "max_hold": 60, "fresh": 15},
 ]
 SHOW_BARS = 400
+MARKET_IDLE_MIN = 30               # ingen ny kurs på så många minuter = marknaden har stängt
 MTF_HIGHER = 2                     # antal högre tidsramar som kontrolleras
 MTF_MODES = ["loose", "strict"]    # "loose": ingen emot och minst en med, "strict": alla med.
                                    # Walk-forward väljer läge per strategi på data före varje period.
@@ -142,12 +143,17 @@ def demo_data(seed: int, interval: str, start_price: float) -> pd.DataFrame:
     return pd.DataFrame({"Open": opn, "High": hi, "Low": lo, "Close": close}, index=idx)
 
 
-def drop_unfinished(df: pd.DataFrame, interval: str, now: pd.Timestamp) -> pd.DataFrame:
-    """Tar bort sista baren om den inte har stängt än (signaler bara på stängda bars)."""
+def drop_unfinished(df: pd.DataFrame, interval: str, now: pd.Timestamp,
+                    last_tick: pd.Timestamp | None = None) -> pd.DataFrame:
+    """Tar bort sista baren om den inte har stängt än (signaler bara på stängda bars).
+    Har marknaden stängt (ingen ny kurs på MARKET_IDLE_MIN minuter, t.ex. vid tidig stängning
+    eller helg) räknas sista baren som färdig, annars skulle dagsbaren ligga en dag efter."""
     if df.empty:
         return df
     if df.index[-1] + bar_length(interval) > now:
-        return df.iloc[:-1]
+        idle = last_tick is not None and now - last_tick >= pd.Timedelta(minutes=MARKET_IDLE_MIN)
+        if not (idle and df.index[-1] < last_tick):
+            return df.iloc[:-1]
     return df
 
 
@@ -668,6 +674,14 @@ def load(inst: dict, demo: bool, now: pd.Timestamp) -> tuple[dict[str, pd.DataFr
             raw[iv], syms[iv] = fetch_any(inst["intraday"], iv, 300)
     frames, used = {}, {}
     rules = {"4h": "4h", "30m": "30min", "15m": "15min"}
+    # när kom senaste kursen? (slutet av senaste 1-minuters-, 5-minuters- eller timbaren)
+    last_tick = None
+    for iv in ("1m", "5m", "1h"):
+        src = raw.get(iv)
+        if src is not None and not src.empty:
+            c = clean(src, iv) if not demo else src
+            t = c.index[-1] + bar_length(iv)
+            last_tick = t if last_tick is None else max(last_tick, t)
     for tf in TIMEFRAMES:
         src = raw.get(tf["src"])
         if src is None or src.empty:
@@ -675,7 +689,7 @@ def load(inst: dict, demo: bool, now: pd.Timestamp) -> tuple[dict[str, pd.DataFr
         df = clean(src, tf["src"]) if not demo else src
         if tf["id"] in rules:
             df = resample(df, rules[tf["id"]])
-        frames[tf["id"]] = drop_unfinished(df, tf["id"], now)
+        frames[tf["id"]] = drop_unfinished(df, tf["id"], now, last_tick)
         used[tf["id"]] = syms[tf["src"]]
     return frames, used
 
