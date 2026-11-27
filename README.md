@@ -131,9 +131,23 @@ Fem regelbaserade strategier, åt båda hållen (long och short):
 
 ## Backtest och samlad signal
 1. Inträde på nästa bars öppning. Stoploss = 1,5 / 2 / 3 × ATR, mål = 1 / 1,5 / 2 / 3 R. Når en bar både stopp och mål räknas det som stopp. En schablon för spread/courtage dras av.
-2. Stopp och mål väljs per instrument, tidsram och strategi på **första 70 %** av datan och kontrolleras på **sista 30 %**.
-3. Bara strategier med vinst i båda perioderna röstar. De röstar med sin öppna signal, viktat efter resultatet i kontrollen. Övervikt på minst 25 % ger **KÖP** eller **SÄLJ**, annars **AVVAKTA**.
+2. Stopp och mål väljs per instrument, tidsram och strategi på historiken fram till nu. En strategi används bara om den tjänat pengar där, efter ett avdrag för få affärer.
+3. Strategierna som används röstar med sin öppna signal, viktat efter hur säkert de tjänat pengar. Övervikt på minst 25 % ger **KÖP** eller **SÄLJ**, annars **AVVAKTA**.
 4. Handelsplanen för den samlade signalen: stoploss 2 × ATR, TP1–TP3 = 1R / 2R / 3R.
+
+## Är den lönsam? (walk-forward)
+Samma regler körs bakåt i tiden med bara den data som fanns vid varje tidpunkt: första 40 % är inlärning, resten delas i 6 perioder som handlas en i taget. Resultat med 1 % risk per affär, utan ränta på ränta (körning 27 nov 2026):
+
+| | Testat | Affärer | Snitt R | PF | Per år | Max nedgång | Köp & behåll |
+|---|---|---|---|---|---|---|---|
+| Nasdaq 100, dag | 9 år | 191 | +0,37 | 1,64 | +7,9 % | −10 % | +306 % |
+| Nasdaq 100, 4 h | 1,8 år | 81 | +0,11 | 1,18 | +4,9 % | −14 % | +21 % |
+| Nasdaq 100, timme | 1,7 år | 230 | +0,07 | 1,11 | +9,7 % | −32 % | +29 % |
+| Guld, dag | 9 år | 72 | +0,34 | 1,62 | +2,7 % | −9 % | +178 % |
+| Guld, 4 h | 1,4 år | 182 | +0,41 | 1,80 | +51 % | −13 % | +8 % |
+| Guld, timme | 1,4 år | 425 | +0,23 | 1,43 | +66 % | −20 % | +8 % |
+
+Med dubbla avgifter blir alla fortfarande plus, men Nasdaq på timme är nära noll. Timdata finns bara för knappt två år.
 
 Signalerna räknas bara på stängda bars. Historiskt resultat är ingen garanti.
 

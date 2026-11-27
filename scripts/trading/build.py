@@ -2,8 +2,9 @@
 
 Hämtar kurser från Yahoo Finance (dag och timme, 4 timmar räknas fram från timdata),
 räknar indikatorer, kör fem strategier åt båda hållen (long och short), backtestar
-varje strategi med stoploss och take profit och väger ihop de som håller i
-kontrollperioden till en samlad signal: KÖP, SÄLJ eller AVVAKTA.
+varje strategi med stoploss och take profit och väger ihop de som tjänat pengar
+till en samlad signal: KÖP, SÄLJ eller AVVAKTA. Ett walk-forward-test visar vad boten
+hade gett om den körts live (inställningar valda bara på data före varje period).
 
 Resultatet sparas i site/trading/data/signals.json och visas på /trading/.
 Med --notify skickas nya signaler till Telegram och/eller Discord (se README).
@@ -47,8 +48,10 @@ TIMEFRAMES = [
 
 SL_GRID = [1.5, 2.0, 3.0]          # stoploss i ATR
 TP_GRID = [1.0, 1.5, 2.0, 3.0]     # take profit i R (risken)
-TRAIN_SHARE = 0.7                  # första 70 % väljer inställning, sista 30 % kontrollerar
 MIN_TRADES = 15
+WF_START = 0.4                     # walk-forward: första 40 % är bara inlärning
+WF_FOLDS = 6                       # resten delas i 6 perioder som handlas en i taget
+RISK_PCT = 1.0                     # procent av kontot som riskeras per affär i resultatet i kronor/procent
 
 
 # --------------------------------------------------------------------------- data
@@ -256,16 +259,20 @@ def stats(trades: list[dict]) -> dict:
     }
 
 
-def backtest_strategy(d: pd.DataFrame, strat: dict, tf: dict, cost: float) -> dict:
+def signals(d: pd.DataFrame, strat: dict) -> np.ndarray:
     up, dn = strat["fn"](d)
     sig = np.where(up.fillna(False), 1, np.where(dn.fillna(False), -1, 0))
     sig[:200] = 0  # EMA 200 behöver uppvärmning
-    split = int(len(d) * TRAIN_SHARE)
+    return sig
+
+
+def choose(d: pd.DataFrame, sig: np.ndarray, end: int, tf: dict, cost: float) -> tuple[float, float, dict, bool]:
+    """Väljer stoploss och mål på bars före `end` och avgör om strategin ska användas.
+    Använder bara data före `end`, så att samma regel går att testa ärligt bakåt i tiden."""
     best = None
     for sl_mult in SL_GRID:
         for tp_r in TP_GRID:
-            tr = simulate(d.iloc[:split], sig[:split], sl_mult, tp_r, tf["max_hold"], cost)
-            st = stats(tr)
+            st = stats(simulate(d.iloc[:end], sig[:end], sl_mult, tp_r, tf["max_hold"], cost))
             if st["n"] < MIN_TRADES:
                 continue
             # välj på snitt-R men dra av för få affärer (mindre slump)
@@ -273,20 +280,60 @@ def backtest_strategy(d: pd.DataFrame, strat: dict, tf: dict, cost: float) -> di
             if best is None or score > best[0]:
                 best = (score, sl_mult, tp_r, st)
     if best is None:
-        sl_mult, tp_r, train = 2.0, 2.0, stats(simulate(d.iloc[:split], sig[:split], 2.0, 2.0, tf["max_hold"], cost))
-    else:
-        _, sl_mult, tp_r, train = best
+        st = stats(simulate(d.iloc[:end], sig[:end], 2.0, 2.0, tf["max_hold"], cost))
+        return 2.0, 2.0, st, False
+    score, sl_mult, tp_r, st = best
+    return sl_mult, tp_r, st, score > 0  # används bara om den tjänat pengar även efter avdraget
+
+
+def walk_forward(d: pd.DataFrame, sigs: dict, tf: dict, cost: float) -> dict:
+    """Ärligt test av hela boten: för varje period väljs inställningar och strategier bara på
+    data före perioden, sedan handlas perioden. Ger det resultat boten hade fått live."""
+    n = len(d)
+    start = max(400, int(n * WF_START))
+    edges = np.linspace(start, n, WF_FOLDS + 1).astype(int)
+    per_strat = {k: [] for k in sigs}
+    used = {k: 0 for k in sigs}
+    for a, b in zip(edges[:-1], edges[1:]):
+        for k, sig in sigs.items():
+            sl_mult, tp_r, _, use = choose(d, sig, a, tf, cost)
+            masked = np.zeros_like(sig)
+            masked[a:b] = sig[a:b]
+            trades = [t for t in simulate(d, masked, sl_mult, tp_r, tf["max_hold"], cost) if not t["open"]]
+            for t in trades:
+                t["used"] = use
+            per_strat[k] += trades
+            used[k] += int(use)
+    bot = sorted((t for ts in per_strat.values() for t in ts if t["used"]), key=lambda t: t["exit_i"])
+    st = stats(bot)
+    r = np.array([t["r"] for t in bot]) if bot else np.zeros(0)
+    eq = np.cumsum(r)
+    # pengar: 1 % av kontot riskeras per affär (utan ränta-på-ränta)
+    ret_pct = float(r.sum()) * RISK_PCT
+    dd_pct = st["max_dd"] * RISK_PCT
+    first, last = d.Close.iloc[start], d.Close.iloc[-1]
+    years = (d.index[-1] - d.index[start]).days / 365.25
+    curve = [[fmt_time(d.index[t["exit_i"]], tf["id"]), round(float(e), 2)] for t, e in zip(bot, eq)]
+    return {
+        "from": fmt_time(d.index[start], tf["id"]), "to": fmt_time(d.index[-1], tf["id"]),
+        "years": round(years, 2), "folds": WF_FOLDS, **st,
+        "ret_pct": round(ret_pct, 1), "dd_pct": round(dd_pct, 1),
+        "ret_pct_year": round(ret_pct / years, 1) if years > 0 else None,
+        "bh_pct": round(float((last / first - 1) * 100), 1),
+        "long": stats([t for t in bot if t["dir"] > 0]), "short": stats([t for t in bot if t["dir"] < 0]),
+        "per_strategy": {k: {**stats(v), "used_folds": used[k],
+                             "used": stats([t for t in v if t["used"]])} for k, v in per_strat.items()},
+        "curve": curve,
+    }
+
+
+def backtest_strategy(d: pd.DataFrame, sig: np.ndarray, tf: dict, cost: float) -> dict:
+    """Inställning för live-signalerna: samma regel som i walk-forward, på all data fram till nu."""
+    sl_mult, tp_r, hist, ok = choose(d, sig, len(d), tf, cost)
     all_trades = simulate(d, sig, sl_mult, tp_r, tf["max_hold"], cost)
-    test_trades = [t for t in all_trades if t["i"] >= split]
-    test = stats(test_trades)
-    # strategin räknas med i den samlade signalen om den tjänat pengar i båda perioderna
-    ok = (train["n"] >= MIN_TRADES and (train["avg_r"] or 0) > 0
-          and test["n"] >= 5 and (test["avg_r"] or 0) > 0)
-    weight = 0.0
-    if ok:
-        weight = round(min(1.0, (test["avg_r"] or 0) * math.sqrt(test["n"]) / 2), 3)
+    weight = round(min(1.0, (hist["avg_r"] or 0) * math.sqrt(hist["n"]) / 2), 3) if ok else 0.0
     return {"sig": sig, "trades": all_trades, "sl_mult": sl_mult, "tp_r": tp_r,
-            "train": train, "test": test, "ok": ok, "weight": weight, "split": split}
+            "hist": hist, "ok": ok, "weight": weight}
 
 
 # --------------------------------------------------------------------- sammanvägning
@@ -302,8 +349,10 @@ def analyse(df: pd.DataFrame, inst: dict, tf: dict) -> dict:
     show_from = max(0, n - tf["show"])
     res_strats, markers, active, fresh = [], [], [], []
     score, weight_sum = 0.0, 0.0
+    sigs = {s["id"]: signals(d, s) for s in STRATEGIES}
+    wf = walk_forward(d, sigs, tf, inst["cost"])
     for s in STRATEGIES:
-        bt = backtest_strategy(d, s, tf, inst["cost"])
+        bt = backtest_strategy(d, sigs[s["id"]], tf, inst["cost"])
         open_trade = next((t for t in bt["trades"] if t["open"]), None)
         last_sig_i = int(np.flatnonzero(bt["sig"])[-1]) if np.any(bt["sig"]) else None
         state = 0
@@ -350,7 +399,7 @@ def analyse(df: pd.DataFrame, inst: dict, tf: dict) -> dict:
                            "result": "open" if t["open"] else t["result"], "r": round(t["r"], 2)})
         res_strats.append({
             "id": s["id"], "name": s["name"], "rule": s["rule"], "sl_mult": bt["sl_mult"], "tp_r": bt["tp_r"],
-            "train": bt["train"], "test": bt["test"], "ok": bt["ok"], "weight": bt["weight"], "state": state,
+            "hist": bt["hist"], "wf": wf["per_strategy"][s["id"]], "ok": bt["ok"], "weight": bt["weight"], "state": state,
             "plan": plan, "recent": recent,
         })
 
@@ -394,7 +443,7 @@ def analyse(df: pd.DataFrame, inst: dict, tf: dict) -> dict:
                 "macd_sig": round(float(last.macd_sig), 2)},
         "strategies": res_strats, "active": active, "fresh": fresh,
         "candles": candles, "lines": lines, "markers": markers,
-        "bars": n, "from": fmt_time(d.index[0], tf["id"]), "split_time": fmt_time(d.index[int(n * TRAIN_SHARE)], tf["id"]),
+        "bars": n, "from": fmt_time(d.index[0], tf["id"]), "wf": wf,
     }
 
 
@@ -438,7 +487,7 @@ def main() -> int:
     now = pd.Timestamp.now(tz="UTC")
     OUT.mkdir(parents=True, exist_ok=True)
     result = {"updated": datetime.now(timezone.utc).isoformat(timespec="minutes"), "demo": args.demo,
-              "train_share": TRAIN_SHARE, "instruments": []}
+              "risk_pct": RISK_PCT, "instruments": []}
     for inst in INSTRUMENTS:
         frames, used = load(inst, args.demo, now)
         if not frames:
@@ -452,9 +501,11 @@ def main() -> int:
                 continue
             a = analyse(df, inst, tf)
             entry["timeframes"].append(a)
+            w = a["wf"]
             print(f"{inst['name']:<11} {tf['name']:<9} {a['verdict']:<8} styrka {a['strength']:>3} %  "
-                  f"stängning {a['close']}  strategier som räknas: "
-                  f"{sum(s['ok'] for s in a['strategies'])}/{len(a['strategies'])}")
+                  f"räknas {sum(s['ok'] for s in a['strategies'])}/{len(a['strategies'])}  | walk-forward "
+                  f"{w['from']}→: {w['n']} affärer, vinst {w['win']}, snitt {w['avg_r']}R, PF {w['pf']}, "
+                  f"{w['ret_pct']:+.1f} % ({w['ret_pct_year']:+.1f} %/år), DD {w['dd_pct']} %, köp&behåll {w['bh_pct']:+.1f} %")
         result["instruments"].append(entry)
 
     (OUT / "signals.json").write_text(json.dumps(result, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")

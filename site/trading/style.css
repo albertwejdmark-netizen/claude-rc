@@ -4,11 +4,18 @@
   --wait:#6b7280; --wait-bg:#eef0f3; --grid:#eceef2; --ema20:#d68a00; --ema50:#2a62d9; --ema200:#8b5cf6;
 }
 @media (prefers-color-scheme: dark){
-  :root{
+  :root:not([data-theme="light"]){
     --bg:#0f1115; --panel:#171a20; --text:#e6e8ec; --muted:#959cab; --border:#2a2f38;
     --accent:#6f9bff; --buy:#3ccf86; --buy-bg:#13291f; --sell:#ff6b72; --sell-bg:#311719;
     --wait:#a1a8b5; --wait-bg:#1e222a; --grid:#21252d; --ema20:#f0b33c; --ema50:#6f9bff; --ema200:#b794ff;
+    color-scheme:dark;
   }
+}
+:root[data-theme="dark"]{
+    --bg:#0f1115; --panel:#171a20; --text:#e6e8ec; --muted:#959cab; --border:#2a2f38;
+    --accent:#6f9bff; --buy:#3ccf86; --buy-bg:#13291f; --sell:#ff6b72; --sell-bg:#311719;
+    --wait:#a1a8b5; --wait-bg:#1e222a; --grid:#21252d; --ema20:#f0b33c; --ema50:#6f9bff; --ema200:#b794ff;
+  color-scheme:dark;
 }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
@@ -74,3 +81,5 @@ tr.click{cursor:pointer}
 details summary{cursor:pointer;font-weight:600}
 details p,details li{font-size:14px}
 select{font:inherit;font-size:13px;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px 8px}
+#equity{width:100%;height:220px}
+tr.sel td{background:var(--bg)}

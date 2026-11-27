@@ -77,22 +77,74 @@
 
   function strategyTable(f) {
     const row = (s) => {
-      const t = s.test, tr = s.train;
+      const h = s.hist, w = s.wf.used, a = s.wf;
       return `<tr class="${s.ok ? "" : "off"} click" data-strat="${s.id}">
         <td class="l"><b>${esc(s.name)}</b><div class="rule">${esc(s.rule)}</div></td>
         <td>${s.state ? dirTxt(s.state) : "–"}</td>
         <td>${nf(s.sl_mult)} ATR / ${nf(s.tp_r)}R</td>
-        <td>${tr.n}</td><td>${pct(tr.win)}</td><td class="${cls(tr.avg_r)}">${sgn(tr.avg_r)}</td>
-        <td>${t.n}</td><td>${pct(t.win)}</td><td class="${cls(t.avg_r)}">${sgn(t.avg_r)}</td><td>${t.pf == null ? "–" : nf(t.pf, 2)}</td><td>${nf(t.max_dd)}R</td>
-        <td>${s.ok ? `<span class="tag v-KÖP">Räknas</span>` : `<span class="tag v-AVVAKTA">Räknas ej</span>`}</td>
+        <td>${h.n}</td><td>${pct(h.win)}</td><td class="${cls(h.avg_r)}">${sgn(h.avg_r)}</td>
+        <td>${a.used_folds}/${f.wf.folds}</td><td>${w.n}</td><td>${pct(w.win)}</td><td class="${cls(w.avg_r)}">${sgn(w.avg_r)}</td><td>${w.pf == null ? "–" : nf(w.pf, 2)}</td>
+        <td>${s.ok ? `<span class="tag v-KÖP">Används</span>` : `<span class="tag v-AVVAKTA">Används ej</span>`}</td>
       </tr>`;
     };
-    return `<div class="panel"><h2>Strategier och backtest</h2>
-      <p class="muted small" style="margin-top:-4px">Inställningen (stoploss och mål) väljs på första ${Math.round(state.data.train_share * 100)} % av datan (${fmtTime(f.from)} – ${fmtTime(f.split_time)}). Kontrollen är resten, som strategin inte sett. Bara strategier med vinst i båda perioderna räknas i den samlade signalen. Klicka på en rad för att se dess affärer i grafen.</p>
+    return `<div class="panel"><h2>Strategier</h2>
+      <p class="muted small" style="margin-top:-4px">Stoploss och mål väljs på hela historiken fram till nu. En strategi används bara om den tjänat pengar där (efter ett avdrag för få affärer). Walk-forward visar hur strategin gick i de perioder boten själv valde att använda den. Klicka på en rad för att se dess affärer i grafen.</p>
       <div class="tablewrap"><table>
-        <thead><tr><th class="l" rowspan="2">Strategi</th><th rowspan="2">Nu</th><th rowspan="2">SL / TP</th><th colspan="3" style="text-align:center">Inlärning</th><th colspan="5" style="text-align:center">Kontroll</th><th rowspan="2"></th></tr>
-        <tr><th>Affärer</th><th>Vinst</th><th>Snitt R</th><th>Affärer</th><th>Vinst</th><th>Snitt R</th><th>PF</th><th>Max DD</th></tr></thead>
+        <thead><tr><th class="l" rowspan="2">Strategi</th><th rowspan="2">Nu</th><th rowspan="2">SL / TP</th><th colspan="3" style="text-align:center">Hela historiken</th><th colspan="5" style="text-align:center">Walk-forward (som live)</th><th rowspan="2"></th></tr>
+        <tr><th>Affärer</th><th>Vinst</th><th>Snitt R</th><th>Perioder</th><th>Affärer</th><th>Vinst</th><th>Snitt R</th><th>PF</th></tr></thead>
         <tbody>${f.strategies.map(row).join("")}</tbody></table></div></div>`;
+  }
+
+  function profitPanel(f) {
+    const rp = state.data.risk_pct;
+    const rows = [];
+    state.data.instruments.forEach((i) => i.timeframes.forEach((t) => rows.push({ i, t, w: t.wf })));
+    const yrs = (w) => w.years >= 1 ? nf(w.years, 1) + " år" : Math.round(w.years * 12) + " mån";
+    const verdict = (w) => w.n < 60 ? "För få affärer" : (w.pf || 0) >= 1.3 && w.avg_r >= 0.15 ? "Lönsam" : (w.pf || 0) > 1.05 ? "Svag" : "Inte lönsam";
+    const vcls = (v) => v === "Lönsam" ? "v-KÖP" : v === "Inte lönsam" ? "v-SÄLJ" : "v-AVVAKTA";
+    const w = f.wf;
+    return `<div class="panel"><h2>Är den lönsam?</h2>
+      <p class="muted small" style="margin-top:-4px">Walk-forward: boten väljer stoploss, mål och vilka strategier som ska användas <b>bara på data före</b> varje period och handlar sedan perioden (${w.folds} perioder i följd), precis som om den körts live. Avgift för spread dras. Pengar räknat med ${nf(rp, 0)} % av kontot i risk per affär, utan ränta på ränta.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th class="l">Instrument</th><th class="l">Tidsram</th><th>Testat</th><th>Affärer</th><th>Vinst</th><th>Snitt R</th><th>PF</th><th>Resultat</th><th>Per år</th><th>Max nedgång</th><th>Köp &amp; behåll</th><th></th></tr></thead>
+        <tbody>${rows.map(({ i, t, w }) => { const v = verdict(w); return `<tr class="click ${i.id === inst().id && t.tf === f.tf ? "sel" : ""}" data-inst="${i.id}" data-tf="${t.tf}">
+          <td class="l">${esc(i.name)}</td><td class="l">${esc(t.tf_name)}</td><td>${yrs(w)}</td><td>${w.n}</td><td>${pct(w.win)}</td>
+          <td class="${cls(w.avg_r)}">${sgn(w.avg_r)}</td><td>${w.pf == null ? "–" : nf(w.pf, 2)}</td>
+          <td class="${cls(w.ret_pct)}">${sgn(w.ret_pct, 1)} %</td><td class="${cls(w.ret_pct_year)}">${sgn(w.ret_pct_year, 1)} %</td>
+          <td class="neg">−${nf(w.dd_pct, 1)} %</td><td class="${cls(w.bh_pct)}">${sgn(w.bh_pct, 1)} %</td>
+          <td><span class="tag ${vcls(v)}">${v}</span></td></tr>`; }).join("")}</tbody></table></div>
+      <h2 style="margin-top:16px">Resultatkurva · ${esc(inst().name)} · ${esc(f.tf_name.toLowerCase())} <span class="muted small">${fmtTime(w.from)} – ${fmtTime(w.to)}</span></h2>
+      <div id="equity"></div>
+      <p class="muted small">Summa R efter varje stängd affär. Long: ${w.long.n} affärer, snitt ${sgn(w.long.avg_r)}R. Short: ${w.short.n} affärer, snitt ${sgn(w.short.avg_r)}R.</p>
+      <p class="small"><b>Att tänka på:</b> köp &amp; behåll har ofta gett mer i ren avkastning (särskilt Nasdaq på lång sikt), men med mycket större nedgångar. Boten riskerar ${nf(rp, 0)} % per affär och ligger ofta utanför marknaden. Timdata finns bara för knappt två år, så resultaten för 4 timmar och timme bygger på en kort period. Ränta för att ligga över natten (CFD) och slippage vid stora rörelser är inte medräknat.</p>
+    </div>`;
+  }
+
+  function drawEquity(f) {
+    const el = $("#equity");
+    if (!el || !window.LightweightCharts || !f.wf.curve.length) return;
+    if (state.eq) { state.eq.remove(); state.eq = null; }
+    const intraday = typeof f.wf.curve[0][0] === "number";
+    const ch = LightweightCharts.createChart(el, {
+      autoSize: true,
+      layout: { background: { color: css("--panel") }, textColor: css("--muted") },
+      grid: { vertLines: { visible: false }, horzLines: { color: css("--grid") } },
+      rightPriceScale: { borderColor: css("--border") },
+      timeScale: { borderColor: css("--border"), timeVisible: intraday },
+      localization: { locale: "sv-SE", priceFormatter: (v) => nf(v, 1) + "R", timeFormatter: intraday ? (t) => sthlm.format(new Date(t * 1000)) : undefined },
+      handleScroll: false, handleScale: false,
+    });
+    state.eq = ch;
+    const last = f.wf.curve[f.wf.curve.length - 1][1];
+    const s = ch.addBaselineSeries({ baseValue: { type: "price", price: 0 }, lineWidth: 2, priceLineVisible: false,
+      topLineColor: css("--buy"), topFillColor1: css("--buy") + "33", topFillColor2: css("--buy") + "05",
+      bottomLineColor: css("--sell"), bottomFillColor1: css("--sell") + "05", bottomFillColor2: css("--sell") + "33" });
+    // flera affärer kan stänga samma bar: behåll den sista
+    const pts = new Map();
+    f.wf.curve.forEach(([t, v]) => pts.set(t, v));
+    s.setData([...pts].map(([time, value]) => ({ time, value })));
+    ch.timeScale().fitContent();
+    return last;
   }
 
   function activeTable(f) {
@@ -182,8 +234,9 @@
       <ol>
         <li><b>Data:</b> dagsdata (upp till 15 år) och timdata (2 år) från Yahoo Finance. 4-timmarsstaplar byggs av timdatan. Nasdaq 100 = indexet ${esc(state.data.instruments.find((i) => i.id === "NDX")?.symbol || "^NDX")}, guld = terminen ${esc(state.data.instruments.find((i) => i.id === "GOLD")?.symbol || "GC=F")}. Priset hos din mäklare (CFD/US100, XAUUSD) kan skilja något.</li>
         <li><b>Strategier:</b> fem regelbaserade strategier, både long och short: trendföljning, utbrott, rekyl i trend, MACD-vändning och översåld/överköpt.</li>
-        <li><b>Backtest:</b> för varje instrument och tidsram väljs stoploss (1,5/2/3 × ATR) och mål (1/1,5/2/3 R) på första 70 % av datan och kontrolleras på resten.</li>
-        <li><b>Samlad signal:</b> strategier med vinst i båda perioderna röstar med sin öppna signal, viktat efter hur bra de var i kontrollen. Övervikt på minst 25 % ger KÖP eller SÄLJ.</li>
+        <li><b>Backtest:</b> för varje instrument, tidsram och strategi väljs stoploss (1,5/2/3 × ATR) och mål (1/1,5/2/3 R). Strategier som inte tjänat pengar används inte.</li>
+        <li><b>Walk-forward:</b> samma val görs om och om igen med bara den data som fanns vid varje tidpunkt, och nästa period handlas. Det är det ärliga måttet på om boten är lönsam.</li>
+        <li><b>Samlad signal:</b> strategierna som används röstar med sin öppna signal, viktat efter hur säkert de tjänat pengar. Övervikt på minst 25 % ger KÖP eller SÄLJ.</li>
         <li><b>Notiser:</b> boten körs varje timme på vardagar och kan skicka nya signaler till Telegram eller Discord.</li>
       </ol></details></div>`;
   }
@@ -201,8 +254,9 @@
         <div>${chartPanel(f)}${activeTable(f)}</div>
         <div class="panel">${verdictCard(f)}</div>
       </div>
-      ${strategyTable(f)}${recentTable(f)}${howItWorks()}`;
+      ${profitPanel(f)}${strategyTable(f)}${recentTable(f)}${howItWorks()}`;
     drawChart(f);
+    drawEquity(f);
   }
 
   document.addEventListener("click", (e) => {
