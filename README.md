@@ -175,7 +175,9 @@ Varianterna testades med walk-forward på samma data. Siffror = snitt R per aff�
 Kvar att känna till: Yahoo har bara 30–60 dagars data för tidsramar under en timme, så de testerna är korta. Terminerna (`NQ=F`, `GC=F`) har små hopp när kontraktet byts. Ränta för att ligga över natten (CFD) räknas inte.
 
 ## Live-uppdatering av hemsidan
-`trading-bot.yml` kör boten var 5:e minut och lägger färska signaler på grenen **`trading-data`** (en enda commit som skrivs över). Sidan `/trading/` läser därifrån varje minut och ritar om när något är nytt. Zoom, vald tidsram och scrollläge behålls. En grön prick och texten *Live · signaler för X min sedan* visar hur färsk datan är.
+`trading-bot.yml` kör boten **varje minut**: en körning håller på i 55 minuter och räknar om signalerna varje minut. Schemat startar en ny körning var 15:e minut, och den väntar i kön tills den förra är klar. Det behövs eftersom GitHub ofta hoppar över täta scheman. Köade körningar som inte behövs avbryts av GitHub och syns som *cancelled* under Actions, vilket är normalt.
+
+Varje minut läggs färska signaler på grenen **`trading-data`** (en enda commit som skrivs över). Sidan `/trading/` hämtar dem varje minut via GitHubs API (högst 1 minut gammalt; raw.githubusercontent.com används som reserv men kan vara 5 minuter gammalt) och ritar om när något är nytt. Zoom, vald tidsram och scrollläge behålls. Överst visas när boten senast räknade och när senaste kursen kom. När marknaden är stängd (t.ex. helg eller kvällar i USA:s helgdagar) står det *marknaden stängd*.
 
 De tunga testerna sparas i Actions-cachen och räknas om en gång i timmen (dagsgrafen två gånger per dygn). En körning tar därför några sekunder.
 
