@@ -1,0 +1,51 @@
+name: Signalbot (Nasdaq 100 och guld)
+
+# Kör boten varje timme när marknaderna är öppna och skickar nya signaler
+# till Telegram och/eller Discord. Hemsidan uppdateras av "Uppdatera data och publicera hemsidan".
+#
+# Lägg in i Settings → Secrets and variables → Actions:
+#   TELEGRAM_BOT_TOKEN och TELEGRAM_CHAT_ID  (Telegram)
+#   DISCORD_WEBHOOK_URL                      (Discord)
+# Valfritt under Variables: SITE_URL (länk till sidan i meddelandena)
+
+on:
+  schedule:
+    - cron: "3 * * * 1-5"   # varje timme måndag–fredag (UTC), strax efter att timbaren stängt
+    - cron: "3 22,23 * * 0" # söndag kväll när terminerna öppnar
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trading-bot
+  cancel-in-progress: false
+
+jobs:
+  signals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install yfinance numpy pandas
+      # minnet av redan skickade signaler, så att inget skickas två gånger
+      - uses: actions/cache/restore@v4
+        with:
+          path: .cache/trading_sent.json
+          key: trading-sent-${{ github.run_id }}
+          restore-keys: trading-sent-
+      - name: Räkna signaler och skicka nya
+        run: python scripts/trading/build.py --notify
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SITE_URL: ${{ vars.SITE_URL }}
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .cache/trading_sent.json
+          key: trading-sent-${{ github.run_id }}

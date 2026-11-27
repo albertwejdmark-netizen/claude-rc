@@ -111,3 +111,49 @@ cd site && python -m http.server 8000    # öppna http://localhost:8000/fotboll/
 ```
 
 *Statistik och sannolikheter, inga garantier. Spela bara för pengar du har råd att förlora. 18 år. Stöd: [stodlinjen.se](https://www.stodlinjen.se), 020-81 91 00.*
+
+---
+
+# Signalbot (Nasdaq 100 och guld)
+
+`site/trading/` visar köp- och säljsignaler för **Nasdaq 100** (`^NDX`, reserv `NQ=F`) och **guld** (`GC=F`) på tre tidsramar: dag, 4 timmar och timme. Sidan publiceras under `/trading/`, och boten kan skicka nya signaler till Telegram eller Discord.
+
+## Strategier
+Fem regelbaserade strategier, åt båda hållen (long och short):
+
+| Strategi | Regel |
+|---|---|
+| Trendföljning | EMA 20 korsar EMA 50 i samma riktning som EMA 200, ADX > 20 |
+| Utbrott | Stänger över 20-bars högsta / under 20-bars lägsta, EMA 50 rätt sida om EMA 200 |
+| Rekyl i trend | Upptrend och RSI 14 vänder upp över 40 (spegelvänt för short) |
+| MACD-vändning | MACD korsar signallinjen under nollan (long) / över nollan (short), rätt sida om EMA 200 |
+| Översåld/överköpt | RSI 2 < 10 i upptrend, eller > 90 i nedtrend |
+
+## Backtest och samlad signal
+1. Inträde på nästa bars öppning. Stoploss = 1,5 / 2 / 3 × ATR, mål = 1 / 1,5 / 2 / 3 R. Når en bar både stopp och mål räknas det som stopp. En schablon för spread/courtage dras av.
+2. Stopp och mål väljs per instrument, tidsram och strategi på **första 70 %** av datan och kontrolleras på **sista 30 %**.
+3. Bara strategier med vinst i båda perioderna röstar. De röstar med sin öppna signal, viktat efter resultatet i kontrollen. Övervikt på minst 25 % ger **KÖP** eller **SÄLJ**, annars **AVVAKTA**.
+4. Handelsplanen för den samlade signalen: stoploss 2 × ATR, TP1–TP3 = 1R / 2R / 3R.
+
+Signalerna räknas bara på stängda bars. Historiskt resultat är ingen garanti.
+
+## Notiser till Telegram eller Discord
+Arbetsflödet `.github/workflows/trading-bot.yml` kör boten **varje timme på vardagar** och skickar nya strategisignaler (från strategier som räknas) och när den samlade signalen byter läge. Redan skickade signaler sparas i Actions-cachen.
+
+Lägg in under **Settings → Secrets and variables → Actions**:
+- **Telegram:** skapa en bot hos [@BotFather](https://t.me/BotFather), skicka ett meddelande till den och hämta ditt chatt-id (t.ex. via `https://api.telegram.org/bot<TOKEN>/getUpdates`). Spara `TELEGRAM_BOT_TOKEN` och `TELEGRAM_CHAT_ID` som secrets.
+- **Discord:** Kanalinställningar → Integrationer → Webhooks → Ny webhook. Spara adressen som secret `DISCORD_WEBHOOK_URL`.
+- Valfritt: variabeln `SITE_URL` (länk till sidan i meddelandena).
+
+Utan secrets skrivs signalerna bara ut i loggen. Hemsidan uppdateras av huvudarbetsflödet (fyra gånger per vardag), så tim-signalerna på sidan kan vara några timmar gamla. Notiserna är alltid färska.
+
+Lokalt:
+```bash
+pip install yfinance numpy pandas
+python scripts/trading/build.py            # bygger site/trading/data/signals.json
+python scripts/trading/build.py --notify   # och skickar nya signaler
+python scripts/trading/build.py --demo     # syntetisk data, utan nätverk
+cd site && python -m http.server 8000      # öppna http://localhost:8000/trading/
+```
+
+*Endast i informationssyfte, inte investeringsrådgivning. Handel med hävstång kan ge förluster större än insatsen.*

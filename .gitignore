@@ -2,3 +2,4 @@ site/data/
 __pycache__/
 site/fotboll/data/
 .cache/
+site/trading/data/
