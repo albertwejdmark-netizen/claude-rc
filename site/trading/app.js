@@ -306,27 +306,45 @@
   // dem varje minut och ritar om när något är nytt. Utan live-adress används sidans egen fil,
   // som också uppdateras varje minut om boten körs lokalt med --loop.
   const POLL_MS = 60 * 1000;
-  let liveUrl = null;
+  let liveUrl = null, apiUrl = null, apiPausedUntil = 0;
 
   function showAge() {
     const el = $("#age"); if (!el || !state.data) return;
-    const mins = Math.max(0, Math.round((Date.now() - Date.parse(state.data.updated)) / 60000));
-    const when = new Date(state.data.updated).toLocaleString("sv-SE", { timeZone: "Europe/Stockholm", dateStyle: "medium", timeStyle: "short" });
-    const ago = mins < 1 ? "nyss" : mins < 60 ? `för ${mins} min sedan` : mins < 1440 ? `för ${Math.round(mins / 60)} h sedan` : `${when}`;
-    el.textContent = `${state.live ? "Live" : "Uppdaterad"} · signaler ${ago} (${when}) · kollar efter nya varje minut`;
-    $("#live")?.classList.toggle("stale", mins > 20);
+    const ago = (ms) => { const m = Math.max(0, Math.round((Date.now() - ms) / 60000)); return m < 1 ? "nyss" : m < 60 ? `för ${m} min sedan` : m < 2880 ? `för ${Math.round(m / 60)} h sedan` : `för ${Math.round(m / 1440)} dagar sedan`; };
+    const upd = Date.parse(state.data.updated);
+    const mins = (Date.now() - upd) / 60000;
+    // senaste kurs: om ingen ny 1-minutersbar kommit på en stund är marknaden stängd
+    const lastBar = Math.max(0, ...state.data.instruments.map((i) => (i.quote?.time || 0) * 1000));
+    const closed = lastBar && Date.now() - lastBar > 20 * 60000;
+    const tm = (ms) => new Date(ms).toLocaleString("sv-SE", { timeZone: "Europe/Stockholm", weekday: "short", hour: "2-digit", minute: "2-digit" });
+    el.textContent = `${state.live ? "Live" : "Uppdaterad"} · boten räknade ${ago(upd)} (${tm(upd)})`
+      + (closed ? ` · marknaden stängd, senaste kurs ${tm(lastBar)}` : ` · senaste kurs ${tm(lastBar)}`)
+      + " · kollar efter nya varje minut";
+    $("#live")?.classList.toggle("stale", mins > 10);
+    $("#live")?.classList.toggle("closed", !!closed);
   }
 
-  async function getJson(url) {
-    const r = await fetch(url, { cache: "no-cache" });
-    if (!r.ok) throw new Error(r.status);
+  async function getJson(url, headers) {
+    const r = await fetch(url, { cache: "no-cache", headers });
+    if (!r.ok) throw Object.assign(new Error(r.status), { status: r.status });
     return r.json();
+  }
+
+  // Färsk data: GitHubs API ger filen med högst 1 minuts fördröjning (60 anrop/timme per besökare,
+  // men oförändrad fil räknas inte). raw.githubusercontent.com är reserv, den kan vara 5 minuter gammal.
+  async function getLive() {
+    if (apiUrl && Date.now() > apiPausedUntil) {
+      try { return await getJson(apiUrl, { Accept: "application/vnd.github.raw" }); } catch (e) {
+        if (e.status === 403 || e.status === 429) apiPausedUntil = Date.now() + 15 * 60000;
+      }
+    }
+    return liveUrl ? getJson(liveUrl) : null;
   }
 
   async function load(first) {
     let d = null, src = null;
-    if (liveUrl) {
-      try { d = await getJson(liveUrl); src = "live"; } catch (e) { /* faller tillbaka på sidans egen fil */ }
+    if (liveUrl || apiUrl) {
+      try { d = await getLive(); if (d) src = "live"; } catch (e) { /* faller tillbaka på sidans egen fil */ }
     }
     try {
       const own = await getJson("data/signals.json");
@@ -348,7 +366,7 @@
   }
 
   (async () => {
-    try { liveUrl = (await getJson("data/live.json")).url || null; } catch (e) { liveUrl = null; }
+    try { const c = await getJson("data/live.json"); liveUrl = c.url || null; apiUrl = c.api || null; } catch (e) { liveUrl = apiUrl = null; }
     try { await load(true); } catch (e) {
       app.innerHTML = '<p class="notice">Signalerna är inte framräknade än. Kör <code>python scripts/trading/build.py</code> eller arbetsflödet i GitHub Actions.</p>';
       return;

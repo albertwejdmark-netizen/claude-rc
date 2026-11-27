@@ -1,11 +1,14 @@
 name: Signalbot (Nasdaq 100 och guld)
 
-# Kör boten var 5:e minut när marknaderna är öppna:
-#  1. räknar signaler på alla sju tidsramar,
-#  2. skickar nya signaler till Telegram och/eller Discord,
-#  3. lägger färska signaler på grenen "trading-data", som hemsidan läser varje minut (live).
-# GitHub startar schemalagda jobb med några minuters fördröjning. För 1- och 5-minuterssignaler
-# i realtid: kör `python scripts/trading/build.py --notify --loop 60` på en egen dator eller server.
+# Boten körs varje minut: varje körning håller på i knappt en timme och räknar om signalerna
+# varje minut. Schemat startar en ny körning var 15:e minut. Den väntar i kön tills den
+# förra är klar, så att det alltid finns en körning igång (GitHub hoppar annars ofta över
+# täta scheman). Köade körningar som inte behövs avbryts av GitHub och syns som "cancelled".
+#
+# Varje minut:
+#  1. räknas signaler på alla sju tidsramar,
+#  2. skickas nya signaler till Telegram och/eller Discord,
+#  3. läggs färska signaler på grenen "trading-data", som hemsidan läser varje minut.
 #
 # Lägg in i Settings → Secrets and variables → Actions:
 #   TELEGRAM_BOT_TOKEN och TELEGRAM_CHAT_ID  (Telegram)
@@ -14,9 +17,13 @@ name: Signalbot (Nasdaq 100 och guld)
 
 on:
   schedule:
-    - cron: "*/5 * * * 1-5"    # var 5:e minut måndag–fredag (UTC)
-    - cron: "*/5 22,23 * * 0"  # söndag kväll när terminerna öppnar
+    - cron: "*/15 * * * 1-5"    # måndag–fredag (UTC)
+    - cron: "*/15 22,23 * * 0"  # söndag kväll när terminerna öppnar
   workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Hur länge körningen ska hålla på (minuter)"
+        default: "55"
 
 permissions:
   contents: write # för att uppdatera grenen trading-data
@@ -28,7 +35,7 @@ concurrency:
 jobs:
   signals:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,9 +52,33 @@ jobs:
             .cache/trading_fit.pkl
           key: trading-${{ github.run_id }}
           restore-keys: trading-
-      - name: Räkna signaler och skicka nya
-        run: python scripts/trading/build.py --notify
+      - name: Räkna signaler varje minut, skicka nya och publicera till trading-data
+        run: |
+          publish() {
+            rm -rf /tmp/live && mkdir -p /tmp/live && cp site/trading/data/signals.json /tmp/live/
+            (
+              cd /tmp/live
+              git init -q -b trading-data
+              git -c user.name="signalbot" -c user.email="signalbot@users.noreply.github.com" add signals.json
+              git -c user.name="signalbot" -c user.email="signalbot@users.noreply.github.com" commit -qm "Signaler $(date -u +%Y-%m-%dT%H:%MZ)"
+              # en enda commit som skrivs över varje gång, så att historiken inte växer
+              git push -qf "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" trading-data
+            )
+          }
+          end=$(( $(date +%s) + ${MINUTES:-55} * 60 ))
+          while [ "$(date +%s)" -lt "$end" ]; do
+            start=$(date +%s)
+            if python scripts/trading/build.py --notify; then
+              publish || echo "Kunde inte publicera, försöker igen nästa minut"
+            else
+              echo "Körningen misslyckades, försöker igen nästa minut"
+            fi
+            took=$(( $(date +%s) - start ))
+            [ "$took" -lt 60 ] && sleep $(( 60 - took ))
+          done
         env:
+          MINUTES: ${{ github.event.inputs.minutes || '55' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -59,14 +90,3 @@ jobs:
             .cache/trading_sent.json
             .cache/trading_fit.pkl
           key: trading-${{ github.run_id }}
-      - name: Publicera färska signaler till grenen trading-data
-        run: |
-          mkdir -p /tmp/live && cp site/trading/data/signals.json /tmp/live/
-          cd /tmp/live
-          git init -q -b trading-data
-          git -c user.name="signalbot" -c user.email="signalbot@users.noreply.github.com" add signals.json
-          git -c user.name="signalbot" -c user.email="signalbot@users.noreply.github.com" commit -qm "Signaler $(date -u +%Y-%m-%dT%H:%MZ)"
-          # en enda commit som skrivs över varje gång, så att historiken inte växer
-          git push -qf "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" trading-data
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

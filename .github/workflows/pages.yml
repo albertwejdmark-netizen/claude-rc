@@ -46,7 +46,7 @@ jobs:
       - name: Signalbot live-adress (sidan läser färska signaler från grenen trading-data)
         run: |
           mkdir -p site/trading/data
-          echo '{"url":"https://raw.githubusercontent.com/${{ github.repository }}/trading-data/signals.json"}' > site/trading/data/live.json
+          echo '{"api":"https://api.github.com/repos/${{ github.repository }}/contents/signals.json?ref=trading-data","url":"https://raw.githubusercontent.com/${{ github.repository }}/trading-data/signals.json"}' > site/trading/data/live.json
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
