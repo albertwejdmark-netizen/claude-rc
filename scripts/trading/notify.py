@@ -73,7 +73,8 @@ def build_messages(result: dict, state: dict, now: float | None = None) -> tuple
                     f"{ARROW[f['dir']]} {inst['name']} ({tf['tf_name'].lower()}, {tf.get('symbol', '')})\n"
                     f"Strategi: {f['name']}  ·  för {age} min sedan\n"
                     f"Kurs: {fmt(f['price'])}  SL: {fmt(f['sl'])}  TP: {fmt(f['tp'])} ({f['tp_r']:g}R)\n"
-                    f"Högre tidsramar: {higher}\n"
+                    + (f"Flytta stoppet till inträdet vid +{f['be']:g}R\n" if f.get("be") else "")
+                    + f"Högre tidsramar: {higher}\n"
                     f"{tl}\n"
                     f"Testat: {w['n']} affärer, vinst {round((w['win'] or 0) * 100)} %, snitt {w['avg_r']:+.2f}R, PF {w['pf']}".replace(".", ",")
                 )

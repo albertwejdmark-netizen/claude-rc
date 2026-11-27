@@ -15,7 +15,7 @@
   const cls = (x) => x == null ? "" : x > 0 ? "pos" : x < 0 ? "neg" : "";
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const dirTxt = (d) => d > 0 ? '<span class="buy">Long</span>' : '<span class="sell">Short</span>';
-  const RES = { tp: "Mål nått", sl: "Stoppad", time: "Tidsstopp", open: "Öppen" };
+  const RES = { tp: "Mål nått", sl: "Stoppad", be: "Stopp på inträdet", time: "Tidsstopp", open: "Öppen" };
 
   const sthlm = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   const sthlmHour = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit" });
@@ -35,11 +35,10 @@
 
   function overview() {
     return `<div class="overview">${state.data.instruments.map((i) => {
-      const d = i.timeframes[0], c = i.combined, now = i.timeframes[i.timeframes.length - 1];
-      const chg = d.tf === "1d" ? (now.close / d.close - 1) * 100 : d.change_pct;
+      const c = i.combined, q = i.quote || { price: i.timeframes[0].close, change_pct: i.timeframes[0].change_pct, symbol: "" };
       return `<div class="ov ${i.id === inst().id ? "on" : ""}" data-inst="${i.id}">
         <div class="head"><span class="name">${esc(i.name)}</span>
-          <span class="px" title="Senaste kurs (${esc(now.tf_name)}), ändring mot senaste dagsstängning">${nf(now.close)} <span class="small ${cls(chg)}">${sgn(chg)} %</span></span></div>
+          <span class="px" title="Senaste kurs (${esc(q.symbol)}), ändring mot förra handelsdagens stängning">${nf(q.price)} <span class="small ${cls(q.change_pct)}">${sgn(q.change_pct)} %</span></span></div>
         <div class="combo v-${c.verdict}"><span>Alla tidsramar</span><b>${c.verdict}${c.verdict === "AVVAKTA" ? "" : " " + c.strength + " %"}</b>
           <span class="small">${c.buy} köp · ${c.sell} sälj · ${c.wait} avvakta</span></div>
         <div class="row">${i.timeframes.map((t) => `<div class="cell v-${t.verdict} ${t.notify_ok ? "live" : ""}" data-inst="${i.id}" data-tf="${t.tf}" title="${esc(t.tf_name)}: ${t.verdict}${t.notify_ok ? ", skickar notiser" : ""}">
@@ -84,13 +83,15 @@
       </div>`;
   }
 
+  const setting = (p) => `${nf(p.sl_mult)} ATR / ${nf(p.tp_r)}R${p.be ? " · BE" : ""}${p.mode === "strict" ? " · strikt" : p.mode === "loose" ? "" : ""}`;
+
   function strategyTable(f) {
     const row = (s) => {
       const h = s.hist, w = s.wf.used, m = s.wf_mtf.used;
       return `<tr class="${s.ok || s.ok_mtf ? "" : "off"} click" data-strat="${s.id}">
         <td class="l"><b>${esc(s.name)}</b><div class="rule">${esc(s.rule)}</div></td>
         <td>${s.state ? dirTxt(s.state) : "–"}</td>
-        <td>${nf(s.sl_mult)} ATR / ${nf(s.tp_r)}R</td>
+        <td>${setting(s.mtf_params)}</td>
         <td>${h.n}</td><td class="${cls(h.avg_r)}">${sgn(h.avg_r)}</td>
         <td>${w.n}</td><td class="${cls(w.avg_r)}">${sgn(w.avg_r)}</td>
         <td>${m.n}</td><td>${pct(m.win)}</td><td class="${cls(m.avg_r)}">${sgn(m.avg_r)}</td><td>${m.pf == null ? "–" : nf(m.pf, 2)}</td>
@@ -98,9 +99,9 @@
       </tr>`;
     };
     return `<div class="panel"><h2>Strategier · ${esc(f.tf_name.toLowerCase())}</h2>
-      <p class="muted small" style="margin-top:-4px">Stoploss och mål väljs på historiken fram till nu. En strategi används bara om den tjänat pengar där. Walk-forward visar hur strategin gick i perioderna där boten själv valde att använda den, utan och med filtret för högre tidsramar. Notiserna använder kolumnen Med filter. Klicka på en rad för att se strategins affärer i grafen.</p>
+      <p class="muted small" style="margin-top:-4px">Stoploss och mål väljs på historiken fram till nu. En strategi används bara om den tjänat pengar där. Walk-forward visar hur strategin gick i perioderna där boten själv valde att använda den, utan och med filtret för högre tidsramar. Notiserna använder kolumnen Med filter. Inställning = stoploss / mål med filter. BE = stoppet flyttas till inträdet efter +1R. Strikt = båda högre tidsramarna måste gå åt samma håll. Klicka på en rad för att se strategins affärer i grafen.</p>
       <div class="tablewrap"><table>
-        <thead><tr><th class="l" rowspan="2">Strategi</th><th rowspan="2">Nu</th><th rowspan="2">SL / TP</th><th colspan="2" style="text-align:center">Historiken</th><th colspan="2" style="text-align:center">Utan filter</th><th colspan="4" style="text-align:center">Med filter (som live)</th><th rowspan="2"></th></tr>
+        <thead><tr><th class="l" rowspan="2">Strategi</th><th rowspan="2">Nu</th><th rowspan="2">Inställning</th><th colspan="2" style="text-align:center">Historiken</th><th colspan="2" style="text-align:center">Utan filter</th><th colspan="4" style="text-align:center">Med filter (som live)</th><th rowspan="2"></th></tr>
         <tr><th>Affärer</th><th>Snitt R</th><th>Affärer</th><th>Snitt R</th><th>Affärer</th><th>Vinst</th><th>Snitt R</th><th>PF</th></tr></thead>
         <tbody>${f.strategies.map(row).join("")}</tbody></table></div></div>`;
   }
@@ -115,16 +116,16 @@
     const w = f.wf_mtf;
     return `<div class="panel"><h2>Är den lönsam?</h2>
       <p class="muted small" style="margin-top:-4px">Walk-forward: boten väljer stoploss, mål och strategier <b>bara på data före</b> varje period och handlar sedan perioden, precis som live. <b>Med filter</b> = signalen tas bara när de ${state.data.mtf_higher} närmast högre tidsramarna inte pekar åt andra hållet och minst en håller med. Spread och slippage dras (${esc(String(inst().cost_pts).replace(".", ","))} punkter per affär för ${esc(inst().name)}). Pengar räknat med ${nf(rp, 0)} % av kontot i risk per affär.
-      Notiser skickas bara där testet med filter har minst ${rule.min_trades} affärer, vinstfaktor (PF) minst ${nf(rule.min_pf, 1)} och t-värde minst ${nf(rule.min_t, 1)}. Ett t-värde under 2 betyder att resultatet lika gärna kan vara tur.</p>
+      Notiser skickas bara där testet med filter har minst ${rule.min_trades} affärer, vinstfaktor (PF) minst ${nf(rule.min_pf, 1)} och t-värde minst ${nf(rule.min_t, 1)}. Ett t-värde under 2 betyder att resultatet lika gärna kan vara tur. <b>Max öppna</b> = flest affärer öppna samtidigt (alla strategier). Med ${nf(rp, 0)} % per affär kan risken då vara flera procent på en gång, så sänk risken per affär om det är för mycket.</p>
       <div class="tablewrap"><table>
-        <thead><tr><th class="l" rowspan="2">Instrument</th><th class="l" rowspan="2">Tidsram</th><th rowspan="2">Testat</th><th colspan="3" style="text-align:center">Utan filter</th><th colspan="7" style="text-align:center">Med filter för högre tidsramar</th><th rowspan="2"></th></tr>
-        <tr><th>Affärer</th><th>Snitt R</th><th>PF</th><th>Affärer</th><th>Vinst</th><th>Snitt R</th><th>PF</th><th>t</th><th>Resultat</th><th>Max nedgång</th></tr></thead>
+        <thead><tr><th class="l" rowspan="2">Instrument</th><th class="l" rowspan="2">Tidsram</th><th rowspan="2">Testat</th><th colspan="3" style="text-align:center">Utan filter</th><th colspan="8" style="text-align:center">Med filter för högre tidsramar</th><th rowspan="2"></th></tr>
+        <tr><th>Affärer</th><th>Snitt R</th><th>PF</th><th>Affärer</th><th>Vinst</th><th>Snitt R</th><th>PF</th><th>t</th><th>Resultat</th><th>Max nedgång</th><th>Max öppna</th></tr></thead>
         <tbody>${rows.map(({ i, t }) => { const u = t.wf, m = t.wf_mtf, v = verdict(t); return `<tr class="click ${i.id === inst().id && t.tf === f.tf ? "sel" : ""}" data-inst="${i.id}" data-tf="${t.tf}">
           <td class="l">${esc(i.name)}</td><td class="l">${esc(t.tf_name)}</td><td>${span(m)}</td>
           <td>${u.n}</td><td class="${cls(u.avg_r)}">${sgn(u.avg_r)}</td><td>${u.pf == null ? "–" : nf(u.pf, 2)}</td>
           <td>${m.n}</td><td>${pct(m.win)}</td><td class="${cls(m.avg_r)}">${sgn(m.avg_r)}</td><td>${m.pf == null ? "–" : nf(m.pf, 2)}</td>
           <td class="${(m.t || 0) >= rule.min_t ? "pos" : ""}">${m.t == null ? "–" : nf(m.t, 1)}</td>
-          <td class="${cls(m.ret_pct)}">${sgn(m.ret_pct, 1)} %</td><td class="neg">−${nf(m.dd_pct, 1)} %</td>
+          <td class="${cls(m.ret_pct)}">${sgn(m.ret_pct, 1)} %</td><td class="neg">−${nf(m.dd_pct, 1)} %</td><td>${m.max_open ?? "–"}</td>
           <td><span class="tag ${vcls(v)}">${v}</span></td></tr>`; }).join("")}</tbody></table></div>
       <h2 style="margin-top:16px">Resultatkurva · ${esc(inst().name)} · ${esc(f.tf_name.toLowerCase())} <span class="muted small">${fmtTime(w.from)} – ${fmtTime(w.to)}</span></h2>
       <div id="equity"></div>
@@ -192,7 +193,7 @@
         <label class="small muted">Visa <select id="show">${opts.map(([v, t]) => `<option value="${v}" ${v === state.show ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>
       </div>
       <div id="chart"></div>
-      <div class="legend"><span><i style="background:var(--ema20)"></i>EMA 20</span><span><i style="background:var(--ema50)"></i>EMA 50</span><span><i style="background:var(--ema200)"></i>EMA 200</span><span>▲ long · ▼ short (✓ mål, ✗ stopp, ⏱ tidsstopp, • öppen)</span></div>
+      <div class="legend"><span><i style="background:var(--ema20)"></i>EMA 20</span><span><i style="background:var(--ema50)"></i>EMA 50</span><span><i style="background:var(--ema200)"></i>EMA 200</span><span>▲ long · ▼ short (✓ mål, ✗ stopp, = stopp på inträdet, ⏱ tidsstopp, • öppen)</span></div>
     </div>`;
   }
 
@@ -229,7 +230,7 @@
     const okMtf = new Set(f.strategies.filter((s) => s.ok_mtf).map((s) => s.id));
     const keep = (m) => state.show === "all" || (state.show === "counted" ? ok.has(m.strategy)
       : state.show === "mtf" ? (okMtf.has(m.strategy) && m.mtf) : m.strategy === state.show);
-    const icon = { tp: "✓", sl: "✗", time: "⏱", open: "•" };
+    const icon = { tp: "✓", sl: "✗", be: "=", time: "⏱", open: "•" };
     const key = (t) => typeof t === "number" ? t : Date.parse(t) / 1000;
     const marks = state.show === "none" ? [] : f.markers.filter(keep).sort((a, b) => key(a.time) - key(b.time)).map((m) => ({
       time: m.time, position: m.dir > 0 ? "belowBar" : "aboveBar", shape: m.dir > 0 ? "arrowUp" : "arrowDown",
@@ -244,7 +245,16 @@
       line(p.tp2, css("--buy"), "TP2");
       line(p.tp3, css("--buy"), "TP3");
     }
-    chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, f.candles.length - 160), to: f.candles.length + 3 });
+    const keepRange = state.keepRange && state.keepRange.key === `${state.inst}|${f.tf}` ? state.keepRange : null;
+    if (keepRange && keepRange.range) {
+      // live-uppdatering: behåll zoomen, men flytta fram om man tittade på sista baren
+      const shift = f.candles.length - keepRange.len;
+      const r = keepRange.range;
+      chart.timeScale().setVisibleLogicalRange(r.to >= keepRange.len - 1 ? { from: r.from + shift, to: r.to + shift } : r);
+    } else {
+      chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, f.candles.length - 160), to: f.candles.length + 3 });
+    }
+    state.keepRange = null;
   }
 
   function howItWorks() {
@@ -254,7 +264,8 @@
         <li><b>Data:</b> Yahoo Finance på sju tidsramar: dag, 4 timmar, timme, 30, 15, 5 och 1 minut (4 h byggs av timdata, 30 och 15 min av 5-minutersdata). Nasdaq 100: dagsdata från indexet, kortare tidsramar från terminen NQ=F som handlas nästan dygnet runt. Guld: terminen GC=F. Priset hos din mäklare (US100, XAUUSD) kan skilja något. Källor: Nasdaq (${esc(sym("NDX"))}), guld (${esc(sym("GOLD"))}).</li>
         <li><b>Strategier:</b> fem regelbaserade strategier, både long och short: trendföljning, utbrott, rekyl i trend, MACD-vändning och översåld/överköpt.</li>
         <li><b>Kombination av tidsramar:</b> en signal tas bara när de två närmast högre tidsramarna inte är i motsatt trend och minst en av dem går åt samma håll. Exempel: en köpsignal på 5 minuter kräver att 15 och 30 minuter inte är i nedtrend.</li>
-        <li><b>Walk-forward:</b> stopp, mål och strategier väljs om och om igen med bara den data som fanns vid varje tidpunkt, och nästa period handlas. Det visar om kombinationen faktiskt hade fungerat.</li>
+        <li><b>Backtestets regler:</b> inträde på nästa bars öppning. Når en bar både stopp och mål räknas det som stopp. Öppnar kursen bortom stoppet (gap över natten eller helgen) räknas utgången på öppningskursen, inte på stoppet. Spread och slippage dras på varje affär.</li>
+        <li><b>Walk-forward:</b> stopp, mål, break-even, filterläge och strategier väljs om och om igen med bara den data som fanns vid varje tidpunkt, och nästa period handlas. Det visar om kombinationen faktiskt hade fungerat.</li>
         <li><b>Notiser:</b> skickas bara för tidsramar som klarat testet med filter (tillräckligt många affärer, vinstfaktor och t-värde), och bara för signaler som klarar filtret när de kommer. Varje notis visar trenden på alla tidsramar.</li>
         <li><b>Samlad signal:</b> per tidsram röstar strategierna som används med sin öppna signal. "Alla tidsramar" är snittet av de sju.</li>
       </ol></details></div>`;
@@ -267,7 +278,7 @@
     const f = frame();
     tabs();
     app.innerHTML = `${d.demo ? '<p class="notice"><b>Demo:</b> datan är syntetisk (testkörning utan nätverk). Riktiga kurser hämtas när GitHub Actions kör boten.</p>' : ""}
-      <p class="muted small" style="margin-top:0">Uppdaterad ${new Date(d.updated).toLocaleString("sv-SE", { timeZone: "Europe/Stockholm", dateStyle: "medium", timeStyle: "short" })}</p>
+      <p class="muted small status" style="margin-top:0"><span id="live" class="livedot ${state.live ? "on" : ""}"></span><span id="age"></span></p>
       ${overview()}
       <div class="grid2">
         <div>${chartPanel(f)}${activeTable(f)}</div>
@@ -276,6 +287,7 @@
       ${profitPanel(f)}${strategyTable(f)}${recentTable(f)}${howItWorks()}`;
     drawChart(f);
     drawEquity(f);
+    showAge();
   }
 
   document.addEventListener("click", (e) => {
@@ -289,8 +301,60 @@
   document.addEventListener("change", (e) => { if (e.target.id === "show") { state.show = e.target.value; save(); drawChart(frame()); } });
   matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => state.data && render());
 
-  fetch("data/signals.json", { cache: "no-cache" })
-    .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
-    .then((d) => { state.data = d; render(); })
-    .catch(() => { app.innerHTML = '<p class="notice">Signalerna är inte framräknade än. Kör <code>python scripts/trading/build.py</code> eller arbetsflödet i GitHub Actions.</p>'; });
+  // ---------------------------------------------------------------- live-uppdatering
+  // Boten lägger färska signaler på grenen trading-data i GitHub (var 5:e minut). Sidan hämtar
+  // dem varje minut och ritar om när något är nytt. Utan live-adress används sidans egen fil,
+  // som också uppdateras varje minut om boten körs lokalt med --loop.
+  const POLL_MS = 60 * 1000;
+  let liveUrl = null;
+
+  function showAge() {
+    const el = $("#age"); if (!el || !state.data) return;
+    const mins = Math.max(0, Math.round((Date.now() - Date.parse(state.data.updated)) / 60000));
+    const when = new Date(state.data.updated).toLocaleString("sv-SE", { timeZone: "Europe/Stockholm", dateStyle: "medium", timeStyle: "short" });
+    const ago = mins < 1 ? "nyss" : mins < 60 ? `för ${mins} min sedan` : mins < 1440 ? `för ${Math.round(mins / 60)} h sedan` : `${when}`;
+    el.textContent = `${state.live ? "Live" : "Uppdaterad"} · signaler ${ago} (${when}) · kollar efter nya varje minut`;
+    $("#live")?.classList.toggle("stale", mins > 20);
+  }
+
+  async function getJson(url) {
+    const r = await fetch(url, { cache: "no-cache" });
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }
+
+  async function load(first) {
+    let d = null, src = null;
+    if (liveUrl) {
+      try { d = await getJson(liveUrl); src = "live"; } catch (e) { /* faller tillbaka på sidans egen fil */ }
+    }
+    try {
+      const own = await getJson("data/signals.json");
+      if (!d || Date.parse(own.updated) > Date.parse(d.updated)) { d = own; src = "own"; }
+    } catch (e) { if (!d && first) throw e; }
+    if (!d) return;
+    if (state.data && d.updated === state.data.updated) { showAge(); return; }
+    const isUpdate = !!state.data;
+    if (isUpdate && state.chart) {
+      // spara zoom och scroll så att uppdateringen inte flyttar sidan
+      const f = frame();
+      state.keepRange = { key: `${state.inst}|${f.tf}`, range: state.chart.timeScale().getVisibleLogicalRange(), len: f.candles.length };
+    }
+    const y = window.scrollY;
+    // live = data från boten via GitHub, eller sidans egen fil som uppdaterats medan sidan var öppen
+    state.data = d; state.live = state.live || src === "live" || (src === "own" && isUpdate);
+    render();
+    if (isUpdate) window.scrollTo(0, y);
+  }
+
+  (async () => {
+    try { liveUrl = (await getJson("data/live.json")).url || null; } catch (e) { liveUrl = null; }
+    try { await load(true); } catch (e) {
+      app.innerHTML = '<p class="notice">Signalerna är inte framräknade än. Kör <code>python scripts/trading/build.py</code> eller arbetsflödet i GitHub Actions.</p>';
+      return;
+    }
+    setInterval(() => { if (!document.hidden) load(false).catch(() => {}); }, POLL_MS);
+    setInterval(showAge, 15000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) load(false).catch(() => {}); });
+  })();
 })();

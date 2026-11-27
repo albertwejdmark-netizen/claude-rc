@@ -1,10 +1,11 @@
 name: Signalbot (Nasdaq 100 och guld)
 
-# Kör boten var 5:e minut när marknaderna är öppna och skickar nya signaler
-# till Telegram och/eller Discord. Hemsidan uppdateras av "Uppdatera data och publicera hemsidan".
-# GitHub kör schemalagda jobb med några minuters fördröjning (ibland mer), så för
-# 1- och 5-minuterssignaler i realtid: kör `python scripts/trading/build.py --notify --loop 60`
-# på en egen dator eller server i stället.
+# Kör boten var 5:e minut när marknaderna är öppna:
+#  1. räknar signaler på alla sju tidsramar,
+#  2. skickar nya signaler till Telegram och/eller Discord,
+#  3. lägger färska signaler på grenen "trading-data", som hemsidan läser varje minut (live).
+# GitHub startar schemalagda jobb med några minuters fördröjning. För 1- och 5-minuterssignaler
+# i realtid: kör `python scripts/trading/build.py --notify --loop 60` på en egen dator eller server.
 #
 # Lägg in i Settings → Secrets and variables → Actions:
 #   TELEGRAM_BOT_TOKEN och TELEGRAM_CHAT_ID  (Telegram)
@@ -18,7 +19,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # för att uppdatera grenen trading-data
 
 concurrency:
   group: trading-bot
@@ -33,13 +34,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/workflows/trading-bot.yml
       - run: pip install yfinance numpy pandas
-      # minnet av redan skickade signaler, så att inget skickas två gånger
+      # minnet av skickade signaler och sparade testresultat (räknas om en gång i timmen)
       - uses: actions/cache/restore@v4
         with:
-          path: .cache/trading_sent.json
-          key: trading-sent-${{ github.run_id }}
-          restore-keys: trading-sent-
+          path: |
+            .cache/trading_sent.json
+            .cache/trading_fit.pkl
+          key: trading-${{ github.run_id }}
+          restore-keys: trading-
       - name: Räkna signaler och skicka nya
         run: python scripts/trading/build.py --notify
         env:
@@ -50,5 +55,18 @@ jobs:
       - uses: actions/cache/save@v4
         if: always()
         with:
-          path: .cache/trading_sent.json
-          key: trading-sent-${{ github.run_id }}
+          path: |
+            .cache/trading_sent.json
+            .cache/trading_fit.pkl
+          key: trading-${{ github.run_id }}
+      - name: Publicera färska signaler till grenen trading-data
+        run: |
+          mkdir -p /tmp/live && cp site/trading/data/signals.json /tmp/live/
+          cd /tmp/live
+          git init -q -b trading-data
+          git -c user.name="signalbot" -c user.email="signalbot@users.noreply.github.com" add signals.json
+          git -c user.name="signalbot" -c user.email="signalbot@users.noreply.github.com" commit -qm "Signaler $(date -u +%Y-%m-%dT%H:%MZ)"
+          # en enda commit som skrivs över varje gång, så att historiken inte växer
+          git push -qf "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" trading-data
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

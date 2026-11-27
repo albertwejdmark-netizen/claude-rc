@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import pickle
 import sys
 import time
 from datetime import datetime, timezone
@@ -59,7 +60,30 @@ TIMEFRAMES = [
     {"id": "1m", "name": "1 min", "short": "1m", "min": 1, "src": "1m", "max_hold": 60, "fresh": 15},
 ]
 SHOW_BARS = 400
-MTF_HIGHER = 2                     # antal högre tidsramar som måste stämma
+MTF_HIGHER = 2                     # antal högre tidsramar som kontrolleras
+MTF_MODES = ["loose", "strict"]    # "loose": ingen emot och minst en med, "strict": alla med.
+                                   # Walk-forward väljer läge per strategi på data före varje period.
+
+# Backtestets regler (se README: "Granskning av backtestet")
+GAP_FILL = True        # öppnar kursen bortom stoppet/målet fylls affären på öppningskursen, inte på nivån
+BE_GRID = [None, 1.0]  # flytta stoppet till inträdet efter +1R, eller inte (väljs som stopp och mål)
+ONE_AT_A_TIME = False  # högst en öppen affär per tidsram (över alla strategier)
+
+# De tunga testerna (walk-forward och val av inställningar) räknas om så här ofta (minuter).
+# Däremellan används sparade inställningar på färsk data, så att boten hinner köras varje minut.
+REFIT_MINUTES = {"1d": 720, "4h": 240, "1h": 120, "30m": 60, "15m": 60, "5m": 60, "1m": 60}
+FIT: dict = {}
+FIT_VERSION = 3  # ändras när testets regler ändras, så att gamla sparade resultat inte används
+
+
+def cached(key: str, tf: str, fn):
+    hit = FIT.get(key)
+    if hit and time.time() - hit[0] < REFIT_MINUTES[tf] * 60:
+        return hit[1]
+    val = fn()
+    FIT[key] = (time.time(), val)
+    return val
+SESSIONS = None        # handelstider i UTC för tidsramar under 1 timme, t.ex. {"NDX": (13, 20)}
 
 SL_GRID = [1.5, 2.0, 3.0]          # stoploss i ATR
 TP_GRID = [1.0, 1.5, 2.0, 3.0]     # take profit i R (risken)
@@ -231,7 +255,8 @@ STRATEGIES = [
 
 # -------------------------------------------------------------------------- backtest
 
-def simulate(d: pd.DataFrame, sig: np.ndarray, sl_mult: float, tp_r: float, max_hold: int, cost: float) -> list[dict]:
+def simulate(d: pd.DataFrame, sig: np.ndarray, sl_mult: float, tp_r: float, max_hold: int, cost: float,
+             be: float | None = None) -> list[dict]:
     """Går in på nästa bars öppning. Stoploss = sl_mult × ATR, take profit = tp_r × risken.
     Når baren både SL och TP räknas det som SL (försiktigt). En affär åt gången per strategi."""
     o, h, l, c, atr = (d[k].to_numpy() for k in ("Open", "High", "Low", "Close", "atr"))
@@ -245,15 +270,27 @@ def simulate(d: pd.DataFrame, sig: np.ndarray, sl_mult: float, tp_r: float, max_
         sl = entry - s * risk
         tp = entry + s * tp_r * risk
         result, exit_i, exit_px = None, None, None
+        stop = sl
         for j in range(i + 1, min(n, i + 1 + max_hold)):
-            hit_sl = l[j] <= sl if s > 0 else h[j] >= sl
+            if GAP_FILL and j > i + 1:
+                # kursen öppnar redan bortom stoppet eller målet (gap över natten/helgen)
+                if (o[j] - stop) * s <= 0:
+                    result, exit_i, exit_px = "sl" if stop == sl else "be", j, o[j]
+                    break
+                if (o[j] - tp) * s >= 0:
+                    result, exit_i, exit_px = "tp", j, o[j]
+                    break
+            hit_sl = l[j] <= stop if s > 0 else h[j] >= stop
             hit_tp = h[j] >= tp if s > 0 else l[j] <= tp
             if hit_sl:
-                result, exit_i, exit_px = "sl", j, sl
+                result, exit_i, exit_px = "sl" if stop == sl else "be", j, stop
                 break
             if hit_tp:
                 result, exit_i, exit_px = "tp", j, tp
                 break
+            if be is not None and stop == sl and ((h[j] if s > 0 else l[j]) - entry) * s >= be * risk:
+                stop = entry  # gäller från nästa bar
+
         if result is None:
             last = min(n, i + 1 + max_hold) - 1
             if last < i + max_hold and last == n - 1:
@@ -296,24 +333,31 @@ def signals(d: pd.DataFrame, strat: dict) -> np.ndarray:
     return sig
 
 
-def choose(d: pd.DataFrame, sig: np.ndarray, end: int, tf: dict, cost: float) -> tuple[float, float, dict, bool]:
-    """Väljer stoploss och mål på bars före `end` och avgör om strategin ska användas.
-    Använder bara data före `end`, så att samma regel går att testa ärligt bakåt i tiden."""
+def choose(d: pd.DataFrame, cands: dict[str, np.ndarray], end: int, tf: dict, cost: float) -> tuple[dict, dict, bool]:
+    """Väljer signalvariant (t.ex. filterläge), stoploss, mål och break-even på bars före `end`
+    och avgör om strategin ska användas. Använder bara data före `end`, så att samma regel
+    går att testa ärligt bakåt i tiden."""
     best = None
-    for sl_mult in SL_GRID:
-        for tp_r in TP_GRID:
-            st = stats(simulate(d.iloc[:end], sig[:end], sl_mult, tp_r, tf["max_hold"], cost))
-            if st["n"] < MIN_TRADES:
-                continue
-            # välj på snitt-R men dra av för få affärer (mindre slump)
-            score = st["avg_r"] - 0.5 / math.sqrt(st["n"])
-            if best is None or score > best[0]:
-                best = (score, sl_mult, tp_r, st)
+    dd = d.iloc[:end]
+    for var, sig in cands.items():
+        for sl_mult in SL_GRID:
+            for tp_r in TP_GRID:
+                for be in BE_GRID:
+                    if be is not None and be >= tp_r:
+                        continue
+                    st = stats(simulate(dd, sig[:end], sl_mult, tp_r, tf["max_hold"], cost, be))
+                    if st["n"] < MIN_TRADES:
+                        continue
+                    # välj på snitt-R men dra av för få affärer (mindre slump)
+                    score = st["avg_r"] - 0.5 / math.sqrt(st["n"])
+                    if best is None or score > best[0]:
+                        best = (score, {"var": var, "sl_mult": sl_mult, "tp_r": tp_r, "be": be}, st)
     if best is None:
-        st = stats(simulate(d.iloc[:end], sig[:end], 2.0, 2.0, tf["max_hold"], cost))
-        return 2.0, 2.0, st, False
-    score, sl_mult, tp_r, st = best
-    return sl_mult, tp_r, st, score > 0  # används bara om den tjänat pengar även efter avdraget
+        var = next(iter(cands))
+        prm = {"var": var, "sl_mult": 2.0, "tp_r": 2.0, "be": None}
+        return prm, stats(simulate(dd, cands[var][:end], 2.0, 2.0, tf["max_hold"], cost)), False
+    score, prm, st = best
+    return prm, st, score > 0  # används bara om den tjänat pengar även efter avdraget
 
 
 def walk_forward(d: pd.DataFrame, sigs: dict, tf: dict, cost: float) -> dict:
@@ -326,15 +370,28 @@ def walk_forward(d: pd.DataFrame, sigs: dict, tf: dict, cost: float) -> dict:
     used = {k: 0 for k in sigs}
     for a, b in zip(edges[:-1], edges[1:]):
         for k, sig in sigs.items():
-            sl_mult, tp_r, _, use = choose(d, sig, a, tf, cost)
-            masked = np.zeros_like(sig)
-            masked[a:b] = sig[a:b]
-            trades = [t for t in simulate(d, masked, sl_mult, tp_r, tf["max_hold"], cost) if not t["open"]]
+            prm, _, use = choose(d, sig, a, tf, cost)
+            chosen = sig[prm["var"]]
+            masked = np.zeros_like(chosen)
+            masked[a:b] = chosen[a:b]
+            trades = [t for t in simulate(d, masked, prm["sl_mult"], prm["tp_r"], tf["max_hold"], cost, prm["be"])
+                      if not t["open"]]
             for t in trades:
                 t["used"] = use
             per_strat[k] += trades
             used[k] += int(use)
-    bot = sorted((t for ts in per_strat.values() for t in ts if t["used"]), key=lambda t: t["exit_i"])
+    bot = sorted((t for ts in per_strat.values() for t in ts if t["used"]), key=lambda t: (t["i"], t["exit_i"]))
+    if ONE_AT_A_TIME:
+        kept, free = [], -1
+        for t in bot:
+            if t["i"] >= free:
+                kept.append(t)
+                free = t["exit_i"]
+        bot = kept
+    # flest affärer öppna samtidigt (risken kan bli flera procent på en gång)
+    ev = sorted([(t["i"] + 1, 1) for t in bot] + [(t["exit_i"] + 1, -1) for t in bot])
+    max_open = int(max(np.cumsum([e for _, e in ev]), default=0)) if ev else 0
+    bot.sort(key=lambda t: t["exit_i"])
     st = stats(bot)
     r = np.array([t["r"] for t in bot]) if bot else np.zeros(0)
     eq = np.cumsum(r)
@@ -346,7 +403,7 @@ def walk_forward(d: pd.DataFrame, sigs: dict, tf: dict, cost: float) -> dict:
     curve = [[fmt_time(d.index[t["exit_i"]], tf["id"]), round(float(e), 2)] for t, e in zip(bot, eq)]
     return {
         "from": fmt_time(d.index[start], tf["id"]), "to": fmt_time(d.index[-1], tf["id"]),
-        "years": round(years, 2), "folds": WF_FOLDS, **st,
+        "years": round(years, 2), "folds": WF_FOLDS, **st, "max_open": max_open,
         "ret_pct": round(ret_pct, 1), "dd_pct": round(dd_pct, 1),
         # omräkning till per år bara när testet är minst ett halvår, annars blir siffran missvisande
         "ret_pct_year": round(ret_pct / years, 1) if years >= 0.5 else None,
@@ -358,13 +415,13 @@ def walk_forward(d: pd.DataFrame, sigs: dict, tf: dict, cost: float) -> dict:
     }
 
 
-def backtest_strategy(d: pd.DataFrame, sig: np.ndarray, tf: dict, cost: float) -> dict:
+def backtest_strategy(d: pd.DataFrame, cands: dict[str, np.ndarray], tf: dict, cost: float, key: str = "") -> dict:
     """Inställning för live-signalerna: samma regel som i walk-forward, på all data fram till nu."""
-    sl_mult, tp_r, hist, ok = choose(d, sig, len(d), tf, cost)
-    all_trades = simulate(d, sig, sl_mult, tp_r, tf["max_hold"], cost)
+    prm, hist, ok = cached(key, tf["id"], lambda: choose(d, cands, len(d), tf, cost)) if key else choose(d, cands, len(d), tf, cost)
+    sig = cands[prm["var"]]
+    all_trades = simulate(d, sig, prm["sl_mult"], prm["tp_r"], tf["max_hold"], cost, prm["be"])
     weight = round(min(1.0, (hist["avg_r"] or 0) * math.sqrt(hist["n"]) / 2), 3) if ok else 0.0
-    return {"sig": sig, "trades": all_trades, "sl_mult": sl_mult, "tp_r": tp_r,
-            "hist": hist, "ok": ok, "weight": weight}
+    return {"sig": sig, "trades": all_trades, **prm, "hist": hist, "ok": ok, "weight": weight}
 
 
 # --------------------------------------------------------------------- sammanvägning
@@ -392,11 +449,13 @@ def higher_trends(lower: pd.DataFrame, lower_tf: str, higher: list[tuple[str, pd
     return out
 
 
-def mtf_allowed(ht: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def mtf_allowed(ht: np.ndarray, mode: str = "loose") -> tuple[np.ndarray, np.ndarray]:
     """Long tillåts om ingen högre tidsram är i nedtrend och minst en är i upptrend. Spegelvänt för short."""
     if ht.shape[1] == 0:
         ones = np.ones(ht.shape[0], dtype=bool)
         return ones, ones
+    if mode == "strict":
+        return (ht > 0).all(axis=1), (ht < 0).all(axis=1)
     long_ok = (ht >= 0).all(axis=1) & (ht > 0).any(axis=1)
     short_ok = (ht <= 0).all(axis=1) & (ht < 0).any(axis=1)
     return long_ok, short_ok
@@ -407,18 +466,29 @@ def analyse(d: pd.DataFrame, inst: dict, tf: dict, cost: float, ht: np.ndarray, 
     last = d.iloc[-1]
     dec = inst["decimals"]
     show_from = max(0, n - SHOW_BARS)
-    long_ok, short_ok = mtf_allowed(ht)
+    allow = {m: mtf_allowed(ht, m) for m in MTF_MODES}
+    long_ok, short_ok = allow["loose"]
     res_strats, markers, active, fresh = [], [], [], []
     score, weight_sum = 0.0, 0.0
     sigs = {s["id"]: signals(d, s) for s in STRATEGIES}
-    sigs_f = {k: np.where(((v > 0) & long_ok) | ((v < 0) & short_ok), v, 0) for k, v in sigs.items()}
-    wf = walk_forward(d, sigs, tf, cost)
-    wf_f = walk_forward(d, sigs_f, tf, cost)
+    if SESSIONS and inst["id"] in SESSIONS and tf["min"] < 60:
+        # bara signaler under de mest likvida timmarna
+        a, b = SESSIONS[inst["id"]]
+        hr = (d.index + bar_length(tf["id"])).hour
+        inside = np.asarray((hr >= a) & (hr < b))
+        sigs = {k: np.where(inside, v, 0) for k, v in sigs.items()}
+    sigs_f = {k: {m: np.where(((v > 0) & lo) | ((v < 0) & so), v, 0) for m, (lo, so) in allow.items()}
+              for k, v in sigs.items()}
+    sigs_u = {k: {"-": v} for k, v in sigs.items()}
+    key = f"{inst['id']}|{tf['id']}"
+    wf = cached(key + "|wf", tf["id"], lambda: walk_forward(d, sigs_u, tf, cost))
+    wf_f = cached(key + "|wf_mtf", tf["id"], lambda: walk_forward(d, sigs_f, tf, cost))
     notify_ok = bool(wf_f["n"] >= NOTIFY_MIN_TRADES and (wf_f["pf"] or 0) >= NOTIFY_MIN_PF
                      and (wf_f["avg_r"] or 0) > 0 and (wf_f["t"] or 0) >= NOTIFY_MIN_T)
     for s in STRATEGIES:
-        bt = backtest_strategy(d, sigs[s["id"]], tf, cost)
-        bf = backtest_strategy(d, sigs_f[s["id"]], tf, cost)
+        bt = backtest_strategy(d, sigs_u[s["id"]], tf, cost, f"{key}|{s['id']}|u")
+        bf = backtest_strategy(d, sigs_f[s["id"]], tf, cost, f"{key}|{s['id']}|f")
+        f_lo, f_so = allow[bf["var"]]
         open_trade = next((t for t in bt["trades"] if t["open"]), None)
         last_sig_i = int(np.flatnonzero(bt["sig"])[-1]) if np.any(bt["sig"]) else None
         state = 0
@@ -448,7 +518,7 @@ def analyse(d: pd.DataFrame, inst: dict, tf: dict, cost: float, ht: np.ndarray, 
 
         if last_sig_i is not None and last_sig_i >= n - tf["fresh"]:
             dr = int(bt["sig"][last_sig_i])
-            aligned = bool(long_ok[last_sig_i] if dr > 0 else short_ok[last_sig_i])
+            aligned = bool(f_lo[last_sig_i] if dr > 0 else f_so[last_sig_i])
             # signalen skickas med inställningen från testet med filter
             atr_i = float(d.atr.iloc[last_sig_i])
             price = float(d.Close.iloc[last_sig_i])
@@ -460,6 +530,7 @@ def analyse(d: pd.DataFrame, inst: dict, tf: dict, cost: float, ht: np.ndarray, 
                           "aligned": aligned, "counts_mtf": bf["ok"],
                           "higher": [int(x) for x in ht[last_sig_i]],
                           "price": round(price, dec), "sl_mult": bf["sl_mult"], "tp_r": bf["tp_r"],
+                          "be": bf["be"], "mode": bf["var"],
                           "sl": round(price - dr * r_f, dec), "tp": round(price + dr * bf["tp_r"] * r_f, dec)})
 
         recent = []
@@ -476,7 +547,8 @@ def analyse(d: pd.DataFrame, inst: dict, tf: dict, cost: float, ht: np.ndarray, 
                            "result": "open" if t["open"] else t["result"], "r": round(t["r"], 2),
                            "mtf": bool(long_ok[t["i"]] if t["dir"] > 0 else short_ok[t["i"]])})
         res_strats.append({
-            "id": s["id"], "name": s["name"], "rule": s["rule"], "sl_mult": bt["sl_mult"], "tp_r": bt["tp_r"],
+            "id": s["id"], "name": s["name"], "rule": s["rule"], "sl_mult": bt["sl_mult"], "tp_r": bt["tp_r"], "be": bt["be"],
+            "mtf_params": {"mode": bf["var"], "sl_mult": bf["sl_mult"], "tp_r": bf["tp_r"], "be": bf["be"]},
             "hist": bt["hist"], "wf": wf["per_strategy"][s["id"]], "wf_mtf": wf_f["per_strategy"][s["id"]],
             "ok": bt["ok"], "ok_mtf": bf["ok"], "weight": bt["weight"], "state": state,
             "plan": plan, "recent": recent,
@@ -518,6 +590,24 @@ def analyse(d: pd.DataFrame, inst: dict, tf: dict, cost: float, ht: np.ndarray, 
         "candles": candles, "lines": lines, "markers": markers,
         "bars": n, "from": fmt_time(d.index[0], tf["id"]), "wf": wf, "wf_mtf": wf_f,
     }
+
+
+def quote(frames: dict[str, pd.DataFrame], used: dict[str, str]) -> dict | None:
+    """Senaste kurs (kortaste tidsramen) och ändring mot förra handelsdagens stängning
+    (22:00 UTC) i samma serie, så att index och termin inte blandas."""
+    tf = next((t["id"] for t in reversed(TIMEFRAMES) if t["id"] in frames and len(frames[t["id"]])), None)
+    if tf is None:
+        return None
+    df = frames[tf]
+    last_close_t = df.index[-1] + bar_length(tf)
+    cut = last_close_t.normalize() + pd.Timedelta(hours=22)
+    if cut >= last_close_t:
+        cut -= pd.Timedelta(days=1)
+    prev = df[df.index + bar_length(tf) <= cut]
+    price = float(df.Close.iloc[-1])
+    chg = (price / float(prev.Close.iloc[-1]) - 1) * 100 if len(prev) else None
+    return {"price": round(price, 2), "change_pct": round(chg, 2) if chg is not None else None,
+            "time": int(last_close_t.timestamp()), "tf": tf, "symbol": used.get(tf, "")}
 
 
 def combine(tfs: list[dict]) -> dict:
@@ -621,6 +711,7 @@ def build(demo: bool) -> dict:
                   f"med filter: {f['n']:>4} aff, snitt {f['avg_r'] if f['avg_r'] is not None else '-':>6}R, PF {f['pf']}, t {f['t']}, "
                   f"{f['ret_pct']:+.1f} % på {f['years']} år, DD {f['dd_pct']} % | notiser {'JA' if a['notify_ok'] else 'nej'}")
         entry["combined"] = combine(entry["timeframes"])
+        entry["quote"] = quote(frames, used)
         result["instruments"].append(entry)
     return result
 
@@ -631,7 +722,18 @@ def main() -> int:
     ap.add_argument("--notify", action="store_true", help="skicka nya signaler till Telegram/Discord")
     ap.add_argument("--loop", type=int, default=0, metavar="SEK", help="kör om och om igen med så många sekunders mellanrum")
     ap.add_argument("--state", default=str(ROOT / ".cache" / "trading_sent.json"), help="fil med redan skickade signaler")
+    ap.add_argument("--fit", default=str(ROOT / ".cache" / "trading_fit.pkl"), help="fil med sparade testresultat")
+    ap.add_argument("--refit", action="store_true", help="räkna om alla tester nu")
     args = ap.parse_args()
+
+    fit_file = Path(args.fit)
+    if fit_file.exists() and not args.refit and not args.demo:
+        try:
+            ver, saved = pickle.loads(fit_file.read_bytes())
+            if ver == FIT_VERSION:
+                FIT.update(saved)
+        except Exception:  # noqa: BLE001
+            pass
 
     OUT.mkdir(parents=True, exist_ok=True)
     while True:
@@ -639,6 +741,9 @@ def main() -> int:
         result = build(args.demo)
         (OUT / "signals.json").write_text(json.dumps(result, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         print(f"Sparade {OUT / 'signals.json'} ({time.time() - t0:.0f} s)")
+        if not args.demo:
+            fit_file.parent.mkdir(parents=True, exist_ok=True)
+            fit_file.write_bytes(pickle.dumps((FIT_VERSION, FIT)))
         if args.notify:
             notify.send_new(result, Path(args.state))
         if not args.loop:

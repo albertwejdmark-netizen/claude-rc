@@ -145,20 +145,45 @@ Inträde på nästa bars öppning. Stoploss 1,5 / 2 / 3 × ATR och mål 1 / 1,5 
 En signal tas bara när de **två närmast högre tidsramarna** inte är i motsatt trend och minst en av dem går åt samma håll (trend = kurs och EMA 50 över/under EMA 200). En köpsignal på 5 minuter kräver alltså att 15 och 30 minuter inte är i nedtrend. Bara högre staplar som redan stängt räknas, så det finns ingen framåtblick. Sidan visar också en samlad signal över alla sju tidsramar.
 
 ## Walk-forward: fungerar det?
-Första 40 % av datan är inlärning, resten delas i 6 perioder. Före varje period väljs stopp, mål och strategier bara på data före perioden, och sedan handlas perioden. Det görs både utan och med filtret för högre tidsramar. Resultat med filter (körning 27 nov 2026, 1 % risk per affär):
+Första 40 % av datan är inlärning, resten delas i 6 perioder. Före varje period väljs stopp, mål, break-even, filterläge och strategier bara på data före perioden, och sedan handlas perioden. Det görs både utan och med filtret för högre tidsramar. Resultat med filter (körning 27 nov 2026, 1 % risk per affär):
 
-| | Testat | Affärer | Snitt R | PF | t | Resultat | Notiser |
-|---|---|---|---|---|---|---|---|
-| Nasdaq 100, dag | 9 år | 191 | +0,37 | 1,65 | 3,0 | +71 % | ja |
-| Nasdaq 100, 4 h | 1,4 år | 74 | −0,19 | 0,70 | −1,5 | −14 % | nej |
-| Nasdaq 100, timme | 1,4 år | 306 | +0,02 | 1,03 | 0,3 | +7 % | nej |
-| Nasdaq 100, 30 / 15 / 5 / 1 min | 18–40 dagar | 53 / 131 / 261 / 505 | +0,08 / +0,17 / +0,14 / −0,01 | | 0,4 / 1,3 / 1,6 / −0,2 | | nej |
-| Guld, dag | 9 år | 81 | +0,46 | 1,88 | 2,5 | +37 % | ja |
-| Guld, 4 h | 1,4 år | 126 | +0,37 | 1,69 | 2,6 | +47 % | ja |
-| Guld, timme | 1,4 år | 320 | +0,37 | 1,69 | 4,0 | +118 % | ja |
-| Guld, 30 / 15 / 5 / 1 min | 18–40 dagar | 55 / 77 / 99 / 314 | +0,19 / +0,03 / +0,05 / −0,01 | | 1,1 / 0,2 / 0,5 / −0,1 | | nej |
+| | Testat | Affärer | Snitt R | PF | t | Resultat | Max öppna | Notiser |
+|---|---|---|---|---|---|---|---|---|
+| Nasdaq 100, dag | 9 år | 195 | +0,35 | 1,60 | 2,8 | +68 % | 5 | ja |
+| Nasdaq 100, 4 h | 1,4 år | 74 | −0,20 | 0,68 | −1,6 | −15 % | 4 | nej |
+| Nasdaq 100, timme | 1,4 år | 286 | +0,03 | 1,05 | 0,4 | +9 % | 4 | nej |
+| Nasdaq 100, 30 / 15 / 5 / 1 min | 18–40 dagar | 58 / 114 / 304 / 372 | −0,02 / +0,05 / +0,04 / −0,01 | | under 0,4 | | | nej |
+| Guld, dag | 9 år | 82 | +0,45 | 2,04 | 2,6 | +37 % | 2 | ja |
+| Guld, 4 h | 1,4 år | 126 | +0,38 | 1,71 | 2,7 | +48 % | 4 | ja |
+| Guld, timme | 1,4 år | 255 | +0,45 | 1,98 | 4,4 | +116 % | 6 | ja |
+| Guld, 30 / 15 / 5 / 1 min | 18–40 dagar | 53 / 99 / 104 / 311 | +0,23 / +0,13 / +0,08 / 0,00 | | 0,0–1,1 | | | nej |
 
-t-värdet visar hur säkert snittet är skilt från noll. Under 2 kan resultatet lika gärna vara tur. Filtret hjälpte mest på guld timme och på Nasdaq 5–30 min, men på de korta tidsramarna är testet för kort för att säga något säkert. 1 minut gick back både med och utan filter.
+t-värdet visar hur säkert snittet är skilt från noll. Under 2 kan resultatet lika gärna vara tur. *Max öppna* är flest affärer öppna samtidigt: med 1 % per affär kan risken då vara 4–6 % på en gång.
+
+## Granskning av backtestet (27 nov 2026)
+Varianterna testades med walk-forward på samma data. Siffror = snitt R per affär med filter.
+
+| Ändring | Effekt | Beslut |
+|---|---|---|
+| **Gap-fyllning:** öppnar kursen bortom stoppet fylls affären på öppningen, inte på stoppnivån | Ärligare, något sämre (Nasdaq dag +0,37 → +0,35, guld timme +0,37 → +0,34) | **Infört**, det gamla testet var för snällt |
+| **Break-even:** stoppet flyttas till inträdet efter +1R | Bättre för guld, sämre för Nasdaq | **Infört som val** i walk-forward |
+| **Strikt filter:** båda högre tidsramarna måste gå åt samma håll | Bättre för guld timme (+0,47), annars lika eller sämre | **Infört som val** i walk-forward |
+| Tillsammans, valt per period | Guld timme +0,34 → +0,45 (t 3,6 → 4,4), guld dag +0,43 → +0,45, övriga ungefär lika | **Standard** |
+| Handelstider (Nasdaq 13–20, guld 7–20 UTC) under 1 timme | Sämre nästan överallt, färre affärer | Inte infört |
+| En affär åt gången per tidsram | Mindre nedgång (guld 4 h 22R → 8R) men färre affärer och lägre t-värde | Inte infört, *Max öppna* visas i stället |
+
+Kvar att känna till: Yahoo har bara 30–60 dagars data för tidsramar under en timme, så de testerna är korta. Terminerna (`NQ=F`, `GC=F`) har små hopp när kontraktet byts. Ränta för att ligga över natten (CFD) räknas inte.
+
+## Live-uppdatering av hemsidan
+`trading-bot.yml` kör boten var 5:e minut och lägger färska signaler på grenen **`trading-data`** (en enda commit som skrivs över). Sidan `/trading/` läser därifrån varje minut och ritar om när något är nytt. Zoom, vald tidsram och scrollläge behålls. En grön prick och texten *Live · signaler för X min sedan* visar hur färsk datan är.
+
+De tunga testerna sparas i Actions-cachen och räknas om en gång i timmen (dagsgrafen två gånger per dygn). En körning tar därför några sekunder.
+
+Lokalt i realtid (varje minut):
+```bash
+python scripts/trading/build.py --notify --loop 60 &
+cd site && python -m http.server 8000      # sidan uppdateras av sig själv
+```
 
 ## Notiser till Telegram eller Discord
 En signal skickas bara om
@@ -167,9 +192,9 @@ En signal skickas bara om
 3. de högre tidsramarna stämmer när signalen kommer, och
 4. signalen är färsk (högst 20 minuter, minst en och en halv bar).
 
-Varje notis visar kurs, stoploss, mål, de högre tidsramarnas trend, trenden på alla sju tidsramar och testresultatet. Testet görs om vid varje körning, så en kort tidsram börjar skicka notiser om den klarar kraven senare.
+Varje notis visar kurs, stoploss, mål, om stoppet ska flyttas till inträdet vid +1R, de högre tidsramarnas trend, trenden på alla sju tidsramar och testresultatet. Testet görs om vid varje körning, så en kort tidsram börjar skicka notiser om den klarar kraven senare.
 
-Arbetsflödet `.github/workflows/trading-bot.yml` kör boten var 5:e minut på vardagar. GitHub startar schemalagda jobb med några minuters fördröjning, så för 1- och 5-minuterssignaler i realtid kör du boten på en egen dator eller server:
+Arbetsflödet `.github/workflows/trading-bot.yml` kör boten var 5:e minut på vardagar (schemalagda arbetsflöden körs bara på `main`). GitHub startar schemalagda jobb med några minuters fördröjning, så för 1- och 5-minuterssignaler i realtid kör du boten på en egen dator eller server:
 ```bash
 python scripts/trading/build.py --notify --loop 60
 ```
@@ -179,7 +204,7 @@ Lägg in under **Settings → Secrets and variables → Actions** (eller som mil
 - **Discord:** Kanalinställningar → Integrationer → Webhooks → Ny webhook. Spara adressen som secret `DISCORD_WEBHOOK_URL`.
 - Valfritt: variabeln `SITE_URL` (länk i meddelandena) och `NOTIFY_WINDOW_MIN` (hur gamla signaler som skickas).
 
-Hemsidan uppdateras av huvudarbetsflödet (fyra gånger per vardag). Notiserna är alltid färska.
+Hemsidan läser färska signaler var 5:e minut (se *Live-uppdatering*).
 
 Lokalt:
 ```bash
