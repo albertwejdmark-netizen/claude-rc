@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Signalbot</title>
+<meta name="description" content="Köp- och säljsignaler för Nasdaq 100 och guld på dag, 4 timmar och timme, med backtest av varje strategi.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Signalbot <span class="muted small">Nasdaq 100 &amp; guld</span></h1>
+  <div class="tabs" id="instTabs" role="tablist" aria-label="Instrument"></div>
+  <div class="tabs" id="tfTabs" role="tablist" aria-label="Tidsram"></div>
+  <a href="../" class="small navlink">Aktier →</a>
+  <a href="../fotboll/" class="small">Fotboll →</a>
+</header>
+<main id="app"><p class="muted">Laddar signaler …</p></main>
+<footer class="muted small">
+  <p>Signalerna räknas på stängda bars. Backtest: inträde på nästa bars öppning, stoploss i ATR, take profit i R, når baren båda räknas det som stoploss. Spread/courtage är dragen med en schablon. Historiskt resultat är ingen garanti.</p>
+  <p><strong>Endast i informationssyfte, inte investeringsrådgivning.</strong> Handel med hävstång (CFD, terminer) kan ge förluster större än insatsen.</p>
+</footer>
+<script src="../vendor/lightweight-charts.standalone.production.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
