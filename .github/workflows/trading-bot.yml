@@ -1,7 +1,10 @@
 name: Signalbot (Nasdaq 100 och guld)
 
-# Kör boten varje timme när marknaderna är öppna och skickar nya signaler
+# Kör boten var 5:e minut när marknaderna är öppna och skickar nya signaler
 # till Telegram och/eller Discord. Hemsidan uppdateras av "Uppdatera data och publicera hemsidan".
+# GitHub kör schemalagda jobb med några minuters fördröjning (ibland mer), så för
+# 1- och 5-minuterssignaler i realtid: kör `python scripts/trading/build.py --notify --loop 60`
+# på en egen dator eller server i stället.
 #
 # Lägg in i Settings → Secrets and variables → Actions:
 #   TELEGRAM_BOT_TOKEN och TELEGRAM_CHAT_ID  (Telegram)
@@ -10,8 +13,8 @@ name: Signalbot (Nasdaq 100 och guld)
 
 on:
   schedule:
-    - cron: "3 * * * 1-5"   # varje timme måndag–fredag (UTC), strax efter att timbaren stängt
-    - cron: "3 22,23 * * 0" # söndag kväll när terminerna öppnar
+    - cron: "*/5 * * * 1-5"    # var 5:e minut måndag–fredag (UTC)
+    - cron: "*/5 22,23 * * 0"  # söndag kväll när terminerna öppnar
   workflow_dispatch:
 
 permissions:
@@ -24,7 +27,7 @@ concurrency:
 jobs:
   signals:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

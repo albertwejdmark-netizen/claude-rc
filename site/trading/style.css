@@ -43,8 +43,14 @@ footer{max-width:1200px;margin:0 auto;padding:0 16px 24px}
 .ov .head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 .ov .name{font-weight:600}
 .ov .px{font-variant-numeric:tabular-nums}
-.ov .row{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
-.ov .cell{border-radius:8px;padding:6px 8px;font-size:13px;text-align:center}
+.ov .row{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-top:8px}
+.ov .cell{padding:5px 2px;font-size:12px;position:relative}
+.ov .cell b{font-size:12px}
+.ov .cell.live::after{content:"";position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.combo{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:2px 10px;border-radius:8px;padding:8px 10px;margin-top:10px}
+.combo b{font-size:16px}
+.tabs{flex-wrap:wrap}
+.ov .cell{border-radius:8px;text-align:center}
 .ov .cell b{display:block;font-size:14px}
 
 .v-KÖP{background:var(--buy-bg);color:var(--buy)}

@@ -6,9 +6,12 @@ Inställningar (miljövariabler, i GitHub: Settings → Secrets and variables �
     DISCORD_WEBHOOK_URL webhook-adress från en Discord-kanal
     SITE_URL            (valfritt) länk till hemsidan, läggs till i meddelandet
 
+    NOTIFY_WINDOW_MIN   (valfritt) hur gamla signaler som skickas, i minuter (standard 20)
+
 Skickar:
-  * nya strategisignaler som kom på senaste stängda baren (bara strategier som håller i backtestet)
-  * när den samlade signalen byter läge (t.ex. AVVAKTA → KÖP)
+  * nya strategisignaler som klarar filtret för högre tidsramar, på tidsramar som tjänat
+    pengar i walk-forward-testet (se build_messages)
+  * när den samlade signalen byter läge på en sådan tidsram (t.ex. AVVAKTA → KÖP)
 Redan skickade signaler sparas i en state-fil så att inget skickas två gånger.
 """
 
@@ -17,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -29,42 +33,61 @@ def fmt(x) -> str:
     return f"{x:,.1f}".replace(",", " ").replace(".", ",")
 
 
-def build_messages(result: dict, state: dict) -> tuple[list[str], dict]:
+def trend_line(inst: dict) -> str:
+    arrow = {1: "▲", -1: "▼", 0: "–"}
+    return "Trend: " + "  ".join(f"{t['tf_short']} {arrow[t['trend']]}" for t in inst["timeframes"])
+
+
+def build_messages(result: dict, state: dict, now: float | None = None) -> tuple[list[str], dict]:
+    """Skickar bara signaler som klarar alla villkor:
+    1. strategin används (har tjänat pengar) i testet med filter för högre tidsramar,
+    2. de högre tidsramarnas trend stämmer med signalen när den kom,
+    3. tidsramen har tjänat pengar i walk-forward-testet med filtret (tillräckligt många affärer,
+       vinstfaktor och t-värde, se build.py),
+    4. signalens bar stängde nyligen (NOTIFY_WINDOW_MIN minuter, minst en bar)."""
+    now = now if now is not None else time.time()
+    window = float(os.environ.get("NOTIFY_WINDOW_MIN", "20")) * 60
     sent = set(state.get("sent", []))
     verdicts = dict(state.get("verdicts", {}))
     first_run = not state
+    arrow = {1: "▲", -1: "▼", 0: "–"}
     msgs = []
     for inst in result["instruments"]:
+        tl = trend_line(inst)
         for tf in inst["timeframes"]:
             key_tf = f"{inst['id']}|{tf['tf']}"
-            atr = tf["ind"]["atr"]
+            w = tf["wf_mtf"]
+            bar_sec = {"1d": 86400, "4h": 14400, "1h": 3600, "30m": 1800, "15m": 900, "5m": 300, "1m": 60}[tf["tf"]]
             for f in tf["fresh"]:
-                if f["bars_ago"] != 0 or not f["counts"]:
+                if not (tf["notify_ok"] and f["counts_mtf"] and f["aligned"]):
+                    continue
+                if now - f["close_ts"] > max(window, bar_sec * 1.5):
                     continue
                 key = f"{key_tf}|{f['strategy']}|{f['time']}|{f['dir']}"
                 if key in sent:
                     continue
                 sent.add(key)
-                risk = f["sl_mult"] * atr
-                sl = f["price"] - f["dir"] * risk
-                tp = f["price"] + f["dir"] * f["tp_r"] * risk
+                age = max(0, round((now - f["close_ts"]) / 60))
+                higher = ", ".join(f"{h} {arrow[t]}" for h, t in zip(tf["mtf"]["higher"], f["higher"])) or "ingen (högsta tidsramen)"
                 msgs.append(
-                    f"{ARROW[f['dir']]} {inst['name']} ({tf['tf_name'].lower()})\n"
-                    f"Strategi: {f['name']}\n"
-                    f"Kurs: {fmt(f['price'])}  SL: {fmt(sl)}  TP: {fmt(tp)} ({f['tp_r']:g}R)\n"
-                    f"Samlad signal: {tf['verdict']} ({tf['strength']} %)"
+                    f"{ARROW[f['dir']]} {inst['name']} ({tf['tf_name'].lower()}, {tf.get('symbol', '')})\n"
+                    f"Strategi: {f['name']}  ·  för {age} min sedan\n"
+                    f"Kurs: {fmt(f['price'])}  SL: {fmt(f['sl'])}  TP: {fmt(f['tp'])} ({f['tp_r']:g}R)\n"
+                    f"Högre tidsramar: {higher}\n"
+                    f"{tl}\n"
+                    f"Testat: {w['n']} affärer, vinst {round((w['win'] or 0) * 100)} %, snitt {w['avg_r']:+.2f}R, PF {w['pf']}".replace(".", ",")
                 )
             prev = verdicts.get(key_tf)
             verdicts[key_tf] = tf["verdict"]
-            if prev is not None and prev != tf["verdict"] and not first_run:
+            if tf["notify_ok"] and prev is not None and prev != tf["verdict"] and not first_run:
                 p = tf["plan"]
                 line = (f"{VERDICT_ICON[tf['verdict']]} {inst['name']} ({tf['tf_name'].lower()}): "
                         f"{prev} → {tf['verdict']} ({tf['strength']} %)\nKurs: {fmt(tf['close'])}")
                 if p:
                     line += f"\nSL: {fmt(p['sl'])}  TP1: {fmt(p['tp1'])}  TP2: {fmt(p['tp2'])}  TP3: {fmt(p['tp3'])}"
-                msgs.append(line)
+                msgs.append(line + "\n" + tl)
     # spara bara de senaste nycklarna så att filen inte växer för evigt
-    return msgs, {"sent": sorted(sent)[-2000:], "verdicts": verdicts}
+    return msgs, {"sent": sorted(sent)[-3000:], "verdicts": verdicts}
 
 
 def post(url: str, data: dict, as_json: bool) -> None:

@@ -116,7 +116,17 @@ cd site && python -m http.server 8000    # öppna http://localhost:8000/fotboll/
 
 # Signalbot (Nasdaq 100 och guld)
 
-`site/trading/` visar köp- och säljsignaler för **Nasdaq 100** (`^NDX`, reserv `NQ=F`) och **guld** (`GC=F`) på tre tidsramar: dag, 4 timmar och timme. Sidan publiceras under `/trading/`, och boten kan skicka nya signaler till Telegram eller Discord.
+`site/trading/` visar köp- och säljsignaler för **Nasdaq 100** och **guld** på sju tidsramar: dag, 4 timmar, timme, 30, 15, 5 och 1 minut. Alla tidsramar kombineras innan en signal skickas, och varje kombination testas med walk-forward så att man ser om den faktiskt hade fungerat. Sidan publiceras under `/trading/`, och boten kan skicka signaler till Telegram eller Discord.
+
+## Data
+| Tidsram | Källa | Historik hos Yahoo |
+|---|---|---|
+| Dag | `^NDX` / `GC=F` | 15 år (begränsat i koden) |
+| 4 timmar, timme | `NQ=F` / `GC=F`, timdata (4 h byggs av timdata) | 2 år |
+| 30, 15, 5 min | `NQ=F` / `GC=F`, 5-minutersdata | 60 dagar |
+| 1 min | `NQ=F` / `GC=F` | 30 dagar |
+
+Nasdaq under dagen tas från terminen NQ=F, som handlas nästan dygnet runt precis som CFD:n US100. Spread och slippage dras med 2,5 punkter (Nasdaq) och 0,6 dollar (guld) per affär.
 
 ## Strategier
 Fem regelbaserade strategier, åt båda hållen (long och short):
@@ -129,37 +139,47 @@ Fem regelbaserade strategier, åt båda hållen (long och short):
 | MACD-vändning | MACD korsar signallinjen under nollan (long) / över nollan (short), rätt sida om EMA 200 |
 | Översåld/överköpt | RSI 2 < 10 i upptrend, eller > 90 i nedtrend |
 
-## Backtest och samlad signal
-1. Inträde på nästa bars öppning. Stoploss = 1,5 / 2 / 3 × ATR, mål = 1 / 1,5 / 2 / 3 R. Når en bar både stopp och mål räknas det som stopp. En schablon för spread/courtage dras av.
-2. Stopp och mål väljs per instrument, tidsram och strategi på historiken fram till nu. En strategi används bara om den tjänat pengar där, efter ett avdrag för få affärer.
-3. Strategierna som används röstar med sin öppna signal, viktat efter hur säkert de tjänat pengar. Övervikt på minst 25 % ger **KÖP** eller **SÄLJ**, annars **AVVAKTA**.
-4. Handelsplanen för den samlade signalen: stoploss 2 × ATR, TP1–TP3 = 1R / 2R / 3R.
+Inträde på nästa bars öppning. Stoploss 1,5 / 2 / 3 × ATR och mål 1 / 1,5 / 2 / 3 R väljs per strategi och tidsram. Når en bar både stopp och mål räknas det som stopp.
 
-## Är den lönsam? (walk-forward)
-Samma regler körs bakåt i tiden med bara den data som fanns vid varje tidpunkt: första 40 % är inlärning, resten delas i 6 perioder som handlas en i taget. Resultat med 1 % risk per affär, utan ränta på ränta (körning 27 nov 2026):
+## Kombination av tidsramar
+En signal tas bara när de **två närmast högre tidsramarna** inte är i motsatt trend och minst en av dem går åt samma håll (trend = kurs och EMA 50 över/under EMA 200). En köpsignal på 5 minuter kräver alltså att 15 och 30 minuter inte är i nedtrend. Bara högre staplar som redan stängt räknas, så det finns ingen framåtblick. Sidan visar också en samlad signal över alla sju tidsramar.
 
-| | Testat | Affärer | Snitt R | PF | Per år | Max nedgång | Köp & behåll |
+## Walk-forward: fungerar det?
+Första 40 % av datan är inlärning, resten delas i 6 perioder. Före varje period väljs stopp, mål och strategier bara på data före perioden, och sedan handlas perioden. Det görs både utan och med filtret för högre tidsramar. Resultat med filter (körning 27 nov 2026, 1 % risk per affär):
+
+| | Testat | Affärer | Snitt R | PF | t | Resultat | Notiser |
 |---|---|---|---|---|---|---|---|
-| Nasdaq 100, dag | 9 år | 191 | +0,37 | 1,64 | +7,9 % | −10 % | +306 % |
-| Nasdaq 100, 4 h | 1,8 år | 81 | +0,11 | 1,18 | +4,9 % | −14 % | +21 % |
-| Nasdaq 100, timme | 1,7 år | 230 | +0,07 | 1,11 | +9,7 % | −32 % | +29 % |
-| Guld, dag | 9 år | 72 | +0,34 | 1,62 | +2,7 % | −9 % | +178 % |
-| Guld, 4 h | 1,4 år | 182 | +0,41 | 1,80 | +51 % | −13 % | +8 % |
-| Guld, timme | 1,4 år | 425 | +0,23 | 1,43 | +66 % | −20 % | +8 % |
+| Nasdaq 100, dag | 9 år | 191 | +0,37 | 1,65 | 3,0 | +71 % | ja |
+| Nasdaq 100, 4 h | 1,4 år | 74 | −0,19 | 0,70 | −1,5 | −14 % | nej |
+| Nasdaq 100, timme | 1,4 år | 306 | +0,02 | 1,03 | 0,3 | +7 % | nej |
+| Nasdaq 100, 30 / 15 / 5 / 1 min | 18–40 dagar | 53 / 131 / 261 / 505 | +0,08 / +0,17 / +0,14 / −0,01 | | 0,4 / 1,3 / 1,6 / −0,2 | | nej |
+| Guld, dag | 9 år | 81 | +0,46 | 1,88 | 2,5 | +37 % | ja |
+| Guld, 4 h | 1,4 år | 126 | +0,37 | 1,69 | 2,6 | +47 % | ja |
+| Guld, timme | 1,4 år | 320 | +0,37 | 1,69 | 4,0 | +118 % | ja |
+| Guld, 30 / 15 / 5 / 1 min | 18–40 dagar | 55 / 77 / 99 / 314 | +0,19 / +0,03 / +0,05 / −0,01 | | 1,1 / 0,2 / 0,5 / −0,1 | | nej |
 
-Med dubbla avgifter blir alla fortfarande plus, men Nasdaq på timme är nära noll. Timdata finns bara för knappt två år.
-
-Signalerna räknas bara på stängda bars. Historiskt resultat är ingen garanti.
+t-värdet visar hur säkert snittet är skilt från noll. Under 2 kan resultatet lika gärna vara tur. Filtret hjälpte mest på guld timme och på Nasdaq 5–30 min, men på de korta tidsramarna är testet för kort för att säga något säkert. 1 minut gick back både med och utan filter.
 
 ## Notiser till Telegram eller Discord
-Arbetsflödet `.github/workflows/trading-bot.yml` kör boten **varje timme på vardagar** och skickar nya strategisignaler (från strategier som räknas) och när den samlade signalen byter läge. Redan skickade signaler sparas i Actions-cachen.
+En signal skickas bara om
+1. tidsramen klarat walk-forward-testet med filter (minst 30 affärer, PF ≥ 1,1, t ≥ 2),
+2. strategin används på tidsramen,
+3. de högre tidsramarna stämmer när signalen kommer, och
+4. signalen är färsk (högst 20 minuter, minst en och en halv bar).
 
-Lägg in under **Settings → Secrets and variables → Actions**:
+Varje notis visar kurs, stoploss, mål, de högre tidsramarnas trend, trenden på alla sju tidsramar och testresultatet. Testet görs om vid varje körning, så en kort tidsram börjar skicka notiser om den klarar kraven senare.
+
+Arbetsflödet `.github/workflows/trading-bot.yml` kör boten var 5:e minut på vardagar. GitHub startar schemalagda jobb med några minuters fördröjning, så för 1- och 5-minuterssignaler i realtid kör du boten på en egen dator eller server:
+```bash
+python scripts/trading/build.py --notify --loop 60
+```
+
+Lägg in under **Settings → Secrets and variables → Actions** (eller som miljövariabler lokalt):
 - **Telegram:** skapa en bot hos [@BotFather](https://t.me/BotFather), skicka ett meddelande till den och hämta ditt chatt-id (t.ex. via `https://api.telegram.org/bot<TOKEN>/getUpdates`). Spara `TELEGRAM_BOT_TOKEN` och `TELEGRAM_CHAT_ID` som secrets.
 - **Discord:** Kanalinställningar → Integrationer → Webhooks → Ny webhook. Spara adressen som secret `DISCORD_WEBHOOK_URL`.
-- Valfritt: variabeln `SITE_URL` (länk till sidan i meddelandena).
+- Valfritt: variabeln `SITE_URL` (länk i meddelandena) och `NOTIFY_WINDOW_MIN` (hur gamla signaler som skickas).
 
-Utan secrets skrivs signalerna bara ut i loggen. Hemsidan uppdateras av huvudarbetsflödet (fyra gånger per vardag), så tim-signalerna på sidan kan vara några timmar gamla. Notiserna är alltid färska.
+Hemsidan uppdateras av huvudarbetsflödet (fyra gånger per vardag). Notiserna är alltid färska.
 
 Lokalt:
 ```bash
